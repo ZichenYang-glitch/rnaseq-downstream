@@ -14,16 +14,28 @@ A modular, Python-based pipeline for automated RNA-seq downstream analysis. It i
 
 ## 🛠 Prerequisites
 
-### Python Environment
-```bash
-conda install -c bioconda -c conda-forge pandas numpy matplotlib seaborn pydeseq2 gseapy scikit-learn
-```
+### Installation via Conda (Recommended)
 
-### HOMER (Optional but recommended)
-For Motif analysis, HOMER must be installed and in your PATH:
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/ZichenYang-glitch/rnaseq-downstream.git
+    cd rnaseq-downstream
+    ```
+
+2.  Create the environment:
+    ```bash
+    conda env create -f environment.yaml
+    ```
+
+3.  Activate the environment:
+    ```bash
+    conda activate rnaseq-downstream
+    ```
+
+### HOMER (Optional)
+For Motif analysis, you may need to manually configure HOMER after installation:
 ```bash
-conda install -c bioconda homer
-# Download genome data (required for analysis)
+# If you uncommented 'homer' in environment.yaml
 perl $(which configureHomer.pl) -install mouse  # or human
 ```
 
