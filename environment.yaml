@@ -1,0 +1,19 @@
+name: rnaseq-downstream
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.9
+  - pandas
+  - numpy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - pydeseq2
+  - gseapy
+  # HOMER is optional but recommended. Uncomment if you want it pre-installed.
+  # - homer 
+  - pip
+  - pip:
+    # Add any pip-specific packages here if needed
