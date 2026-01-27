@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.env
+.venv
+env/
+venv/
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Bioinformatics Data (Ignore large files)
+*.fq
+*.fastq
+*.bam
+*.sam
+*.bai
+*.bw
+*.bigwig
+*.fa
+*.fasta
+*.gtf
+*.gff
+*.gff3
+
+# Input Data Files (specific to this pipeline)
+*.tsv
+*.txt
+*.csv
+!metadata.txt  # Keep example metadata if small
+!config.py     # Keep config
+
+# Output Directories
+Final_Analysis_Pipeline/
+01_QC/
+02_DESeq2_Stats/
+03_Volcano_Plots/
+04_GSEA/
+05_Summary/
+06_Motif/
+deseq2_integrated_results/
+
+# Temporary
+*.log
+*.tmp
