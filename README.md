@@ -11,7 +11,7 @@ conda run -n snakemake snakemake --use-conda --cores 4
 In this model:
 
 - your existing `snakemake` conda environment provides the `snakemake` executable
-- this repository's [environment.yaml](/home/irenadler/projects/rnaseq-downstream/environment.yaml) provides the rule runtime dependencies
+- this repository's [`environment.yaml`](environment.yaml) provides the rule runtime dependencies
 - if you do not pass `--conda-prefix`, Snakemake will cache rule environments under `.snakemake/conda/` inside this repository
 
 ## What It Does
@@ -52,6 +52,51 @@ rnaseq-downstream/
     └── report.py
 ```
 
+## Installation
+
+This workflow is intended to run with:
+
+- one existing conda environment that provides `snakemake`
+- one rule runtime environment managed automatically from [`environment.yaml`](environment.yaml)
+
+### 1. Create or reuse a Snakemake environment
+
+If you already have a working `snakemake` conda environment, reuse it.
+
+Otherwise:
+
+```bash
+conda create -n snakemake -c conda-forge -c bioconda snakemake
+conda activate snakemake
+conda config --set channel_priority strict
+```
+
+### 2. Run the workflow
+
+From the repository root:
+
+```bash
+conda run -n snakemake snakemake --use-conda --cores 4
+```
+
+Snakemake will create and cache rule environments automatically under:
+
+```text
+.snakemake/conda/
+```
+
+### 3. Optional: direct Python mode
+
+If you prefer not to use Snakemake, you can also create a project environment directly from [`environment.yaml`](environment.yaml):
+
+```bash
+conda env create -n rnaseq-downstream -f environment.yaml
+conda activate rnaseq-downstream
+python main.py
+```
+
+This mode is useful for debugging or quick local runs, but Snakemake remains the recommended execution mode.
+
 ## Inputs
 
 You need three main input files:
@@ -76,7 +121,7 @@ Count and TPM matrices should contain genes in rows and sample IDs in columns.
 
 ## Configuration
 
-Main runtime settings live in [workflow_config.yaml](/home/irenadler/projects/rnaseq-downstream/workflow_config.yaml).
+Main runtime settings live in [`workflow_config.yaml`](workflow_config.yaml).
 
 Important fields:
 
@@ -136,7 +181,7 @@ RUN_MOTIF: false
 N_CPUS: 4
 ```
 
-If you prefer a contrast table, point `CONTRASTS_FILE` to a TSV like [contrasts.example.tsv](/home/irenadler/projects/rnaseq-downstream/contrasts.example.tsv):
+If you prefer a contrast table, point `CONTRASTS_FILE` to a TSV like [`contrasts.example.tsv`](contrasts.example.tsv):
 
 ```tsv
 factor	treatment	control	name
@@ -166,12 +211,7 @@ Run the full workflow:
 conda run -n snakemake snakemake --use-conda --cores 4
 ```
 
-This uses the default Snakemake conda cache location:
-
-```text
-.snakemake/conda/
-```
-
+This uses the default Snakemake conda cache location under `.snakemake/conda/`.
 Use a custom prefix only if you explicitly want a shared cache across projects.
 
 Dry-run:
@@ -223,10 +263,10 @@ Main directories:
   contains one subdirectory per contrast and gene-set library
 - `05_Summary/`
   contains `Master_Expression_Table.csv`, `Analysis_Summary.md`, `Report_Index.md`, `Report_Index.html`, annotated heatmaps, DEG count summaries, sample outlier report, QC adjustment comparison, and GSEA summary/clustering outputs
-
-`Report_Index.html` is the recommended delivery entrypoint for browsing the final results.
 - `06_Motif/`
   contains optional HOMER results
+
+`Report_Index.html` is the recommended delivery entrypoint for browsing the final results.
 
 ## Notes On QC: `vst` vs `log1p`
 
@@ -299,26 +339,26 @@ perl $(which configureHomer.pl) -install human
 
 ## Next Reasonable Improvements
 
-- add optional batch-aware QC summaries and covariate diagnostic plots
-- add gene annotation harmonization and ID conversion utilities before GSEA/motif
-- add richer final reports and combined QC summary outputs
 - split runtime environments further if motif dependencies diverge strongly from the DE/GSEA stack
+- add a richer HTML report with more embedded figure previews and stronger cross-linking
+- support a more complete annotation harmonization layer across Ensembl, Entrez, and gene symbols
+- add stronger pathway-network style summaries beyond clustered term matrices
 
 ## What Is Still Missing In A Strong RNA-seq Downstream
 
 This workflow is now solid for standard DE-driven downstream analysis, but a stronger production-grade RNA-seq stack often also includes:
 
-- MA plots, sample-level QC metrics, and covariate association summaries
-  these are already included here now
-- replicate-aware heatmaps for top variable genes or top DE genes
-  still missing
+- explicit upstream assumptions and checks around transcript-to-gene summarization, strandedness, and annotation release
+  this repository starts at merged gene-level matrices and does not validate upstream quantification choices
 - batch-effect visualizations before and after adjustment
-  still missing
-- explicit outlier detection reports based on sample distance or Cook's diagnostics
-  sample-distance-driven and Cook's-based outlier reporting are now included
-- gene annotation harmonization and ID conversion for Ensembl, symbol, Entrez consistency
-  partially addressed here by optional gene-version stripping, but not full annotation mapping
-- pathway summary tables merged across contrasts
-  cross-contrast GSEA summary and term clustering are now included; full enrichment-map style graph summaries are still missing
-- publication-grade summary figures such as DEG count bars, upset plots, and contrast-cluster heatmaps
-  still missing
+  partially addressed here through adjusted PCA, but not yet through a fuller before/after correction reporting layer
+- formal sample sheet and contrast table standards with stronger schema validation
+  contrast tables are supported, but schema enforcement is still lightweight
+- more complete gene annotation harmonization and ID conversion for Ensembl, symbol, and Entrez consistency
+  the workflow supports gene-version stripping and optional annotation joins, but not a full ID normalization layer
+- pathway-network summaries such as enrichment maps or term similarity graphs
+  cross-contrast GSEA summary tables and clustered term matrices are included, but not graph-style pathway views
+- multi-contrast meta-analysis style summaries
+  the current workflow summarizes results across contrasts, but does not yet model shared or opposing effects formally
+- richer publication-grade reporting
+  the workflow already includes MA plots, DEG count summaries, sample QC metrics, Cook's diagnostics, outlier reports, and HTML summary pages, but it does not yet generate a narrative final report or manuscript-style figure set
