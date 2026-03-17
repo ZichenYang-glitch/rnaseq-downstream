@@ -12,6 +12,8 @@ def main():
     contrasts = data.load_contrasts(cfg.DESIGN_FACTOR, cfg.CONTRASTS, cfg.CONTRASTS_FILE)
     data.validate_analysis_inputs(meta, cfg.DESIGN_FACTOR, cfg.REFERENCE_LEVELS, contrasts)
     meta = data.prepare_metadata(meta, cfg.REFERENCE_LEVELS, cfg.CONTINUOUS_FACTORS)
+    upstream_manifest = data.load_upstream_manifest(cfg.UPSTREAM_MANIFEST)
+    upstream_provenance = data.build_upstream_provenance(vars(cfg), upstream_manifest)
     counts_T = data.load_counts(
         cfg.COUNTS_FILE,
         meta.index,
@@ -42,6 +44,15 @@ def main():
         for contrast in contrasts
     ])
     contrast_summary.to_csv(os.path.join(out_dir, 'contrast_summary.tsv'), sep='\t', index=False)
+
+    upstream_rows = [{'field': key, 'value': value} for key, value in upstream_provenance.items()]
+    if not upstream_rows:
+        upstream_rows = [{'field': 'upstream_pipeline_name', 'value': 'not_provided'}]
+    pd.DataFrame(upstream_rows).to_csv(
+        os.path.join(out_dir, 'upstream_provenance.tsv'),
+        sep='\t',
+        index=False,
+    )
 
     with open(os.path.join(out_dir, 'validated_inputs.txt'), 'w', encoding='utf-8') as handle:
         handle.write(f"samples\t{counts_T.shape[0]}\n")

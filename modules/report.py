@@ -64,12 +64,32 @@ def create_master_table(
     print(f"  Master table saved to: {out_path}")
 
 
-def create_analysis_summary(metadata, design_col, results_dict, qc_dir, validation_dir, out_dir):
+def create_analysis_summary(
+    metadata,
+    design_col,
+    results_dict,
+    qc_dir,
+    validation_dir,
+    out_dir,
+    upstream_provenance=None,
+):
     os.makedirs(out_dir, exist_ok=True)
 
     lines = [
         "# Analysis Summary",
         "",
+    ]
+
+    if upstream_provenance:
+        lines.extend([
+            "## Upstream Provenance",
+            "",
+        ])
+        for key, value in upstream_provenance.items():
+            lines.append(f"- {key}: {value}")
+        lines.extend(["",])
+
+    lines.extend([
         "## Samples",
         "",
         f"- Total samples: {metadata.shape[0]}",
@@ -77,7 +97,7 @@ def create_analysis_summary(metadata, design_col, results_dict, qc_dir, validati
         "",
         "### Group Counts",
         "",
-    ]
+    ])
 
     for group, n in metadata[design_col].astype(str).value_counts().sort_index().items():
         lines.append(f"- {group}: {n}")
@@ -352,7 +372,7 @@ def create_gsea_summary(gsea_dir, out_dir, fdr_thresh=0.25, top_terms=20):
         _save_placeholder_plot(heatmap_path, "GSEA Term Clustering", "No terms available.")
 
 
-def create_report_index(output_dir, out_dir):
+def create_report_index(output_dir, out_dir, upstream_provenance=None):
     os.makedirs(out_dir, exist_ok=True)
     lines = [
         "# Report Index",
@@ -360,6 +380,7 @@ def create_report_index(output_dir, out_dir):
         "## Core Outputs",
         "",
         "- `00_Validation/validated_inputs.txt`",
+        "- `00_Validation/upstream_provenance.tsv`",
         "- `01_QC/PCA_Plot.png`",
         "- `01_QC/Adjusted_PCA_Plot.png`",
         "- `01_QC/QC_Metadata_Associations.tsv`",
@@ -374,6 +395,10 @@ def create_report_index(output_dir, out_dir):
         "",
         f"- Output root: `{output_dir}`",
     ]
+    if upstream_provenance:
+        lines.extend(["", "## Upstream Provenance", ""])
+        for key, value in upstream_provenance.items():
+            lines.append(f"- {key}: {value}")
     out_path = os.path.join(out_dir, "Report_Index.md")
     with open(out_path, 'w', encoding='utf-8') as handle:
         handle.write("\n".join(lines) + "\n")
@@ -413,11 +438,12 @@ def create_qc_adjustment_comparison(qc_dir, out_dir):
     pd.DataFrame(rows).to_csv(os.path.join(out_dir, "QC_Adjustment_Comparison.tsv"), sep='\t', index=False)
 
 
-def create_html_report_index(output_dir, out_dir):
+def create_html_report_index(output_dir, out_dir, upstream_provenance=None):
     os.makedirs(out_dir, exist_ok=True)
     contrast_summary_path = os.path.join(output_dir, "02_DESeq2_Stats", "_contrast_summary.csv")
     outlier_path = os.path.join(out_dir, "Sample_Outlier_Report.tsv")
     gsea_summary_path = os.path.join(out_dir, "GSEA_Summary.tsv")
+    upstream_path = os.path.join(output_dir, "00_Validation", "upstream_provenance.tsv")
 
     def rel(path):
         return os.path.relpath(path, out_dir).replace(os.sep, "/")
@@ -497,6 +523,11 @@ def create_html_report_index(output_dir, out_dir):
   </div>
 
   <div class="section">
+    <h2>Upstream Provenance</h2>
+    {preview_table(upstream_path, sep="\\t", n=20)}
+  </div>
+
+  <div class="section">
     <h2>Core Navigation</h2>
   <div class="grid">
     <div class="card">
@@ -505,6 +536,7 @@ def create_html_report_index(output_dir, out_dir):
         <li><a href="../00_Validation/validated_inputs.txt">Validated Inputs</a></li>
         <li><a href="../00_Validation/group_summary.tsv">Group Summary</a></li>
         <li><a href="../00_Validation/contrast_summary.tsv">Contrast Summary</a></li>
+        <li><a href="../00_Validation/upstream_provenance.tsv">Upstream Provenance</a></li>
       </ul>
     </div>
 

@@ -1,5 +1,9 @@
 import pandas as pd
 import sys
+import os
+import json
+
+import yaml
 
 
 def normalize_gene_ids(index, strip_gene_version=True):
@@ -29,6 +33,54 @@ def load_annotation_table(
     ann = ann.dropna().drop_duplicates(subset=[gene_id_col])
     ann.columns = ['gene_id', 'gene_name']
     return ann.set_index('gene_id')
+
+
+def load_upstream_manifest(path):
+    if not path:
+        return {}
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Upstream manifest not found: {path}")
+
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix in {'.yaml', '.yml'}:
+        with open(path, 'r', encoding='utf-8') as handle:
+            data = yaml.safe_load(handle) or {}
+    elif suffix == '.json':
+        with open(path, 'r', encoding='utf-8') as handle:
+            data = json.load(handle) or {}
+    else:
+        df = pd.read_csv(path, sep=None, engine='python')
+        if df.shape[1] < 2:
+            raise ValueError(
+                "Tabular upstream manifest must contain at least two columns: key and value."
+            )
+        data = dict(zip(df.iloc[:, 0].astype(str), df.iloc[:, 1].astype(str)))
+
+    if not isinstance(data, dict):
+        raise ValueError(f"Upstream manifest must define a mapping: {path}")
+    return data
+
+
+def build_upstream_provenance(config_values, manifest=None):
+    manifest = manifest or {}
+    provenance = {
+        'upstream_manifest': config_values.get('UPSTREAM_MANIFEST'),
+        'upstream_pipeline_name': config_values.get('UPSTREAM_PIPELINE_NAME'),
+        'upstream_pipeline_version': config_values.get('UPSTREAM_PIPELINE_VERSION'),
+        'upstream_pipeline_url': config_values.get('UPSTREAM_PIPELINE_URL'),
+        'reference_genome': config_values.get('REFERENCE_GENOME'),
+        'annotation_release': config_values.get('ANNOTATION_RELEASE'),
+        'quantification_method': config_values.get('QUANTIFICATION_METHOD'),
+        'count_matrix_type': config_values.get('COUNT_MATRIX_TYPE'),
+        'tpm_matrix_type': config_values.get('TPM_MATRIX_TYPE'),
+    }
+
+    for key, value in manifest.items():
+        provenance.setdefault(str(key), value)
+        if provenance.get(str(key)) in [None, '']:
+            provenance[str(key)] = value
+
+    return {key: value for key, value in provenance.items() if value not in [None, '']}
 
 
 def load_expression_matrix(path, metadata_samples=None, strip_gene_version=True, aggregate='sum'):

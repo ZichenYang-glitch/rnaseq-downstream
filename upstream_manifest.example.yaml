@@ -1,0 +1,8 @@
+upstream_pipeline_name: nf-core/rnaseq
+upstream_pipeline_version: "3.22.1"
+upstream_pipeline_url: https://nf-co.re/rnaseq
+reference_genome: GRCm39
+annotation_release: not_provided
+quantification_method: STAR alignment + Salmon quantification
+count_matrix_type: gene_counts
+tpm_matrix_type: gene_tpm

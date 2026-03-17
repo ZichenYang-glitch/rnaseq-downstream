@@ -23,6 +23,8 @@ def main():
     contrasts = data.load_contrasts(cfg.DESIGN_FACTOR, cfg.CONTRASTS, cfg.CONTRASTS_FILE)
     data.validate_analysis_inputs(meta, cfg.DESIGN_FACTOR, cfg.REFERENCE_LEVELS, contrasts)
     meta = data.prepare_metadata(meta, cfg.REFERENCE_LEVELS, cfg.CONTINUOUS_FACTORS)
+    upstream_manifest = data.load_upstream_manifest(cfg.UPSTREAM_MANIFEST)
+    upstream_provenance = data.build_upstream_provenance(vars(cfg), upstream_manifest)
     annotation_df = data.load_annotation_table(
         cfg.ANNOTATION_FILE,
         gene_id_col=cfg.ANNOTATION_GENE_ID_COL,
@@ -144,6 +146,7 @@ def main():
             dirs['qc'],
             os.path.join(cfg.OUTPUT_DIR, '00_Validation'),
             dirs['report'],
+            upstream_provenance=upstream_provenance,
         )
         report.create_heatmap_summaries(
             meta,
@@ -169,8 +172,8 @@ def main():
             top_terms=cfg.GSEA_SUMMARY_TOP_TERMS,
         )
         report.create_qc_adjustment_comparison(dirs['qc'], dirs['report'])
-        report.create_report_index(cfg.OUTPUT_DIR, dirs['report'])
-        report.create_html_report_index(cfg.OUTPUT_DIR, dirs['report'])
+        report.create_report_index(cfg.OUTPUT_DIR, dirs['report'], upstream_provenance=upstream_provenance)
+        report.create_html_report_index(cfg.OUTPUT_DIR, dirs['report'], upstream_provenance=upstream_provenance)
         report.create_contrast_report_pages(cfg.OUTPUT_DIR, dirs['report'], results)
         
     print("\n=== Pipeline Complete ===")

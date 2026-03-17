@@ -2,6 +2,15 @@ COUNTS_FILE: salmon.merged.gene_counts.tsv
 TPM_FILE: salmon.merged.gene_tpm.tsv
 METADATA_FILE: metadata.txt
 OUTPUT_DIR: Final_Analysis_Pipeline
+UPSTREAM_MANIFEST: null
+UPSTREAM_PIPELINE_NAME: nf-core/rnaseq
+UPSTREAM_PIPELINE_VERSION: "3.22.1"
+UPSTREAM_PIPELINE_URL: https://nf-co.re/rnaseq
+REFERENCE_GENOME: GRCm39
+ANNOTATION_RELEASE: not_provided
+QUANTIFICATION_METHOD: STAR alignment + Salmon quantification
+COUNT_MATRIX_TYPE: gene_counts
+TPM_MATRIX_TYPE: gene_tpm
 STRIP_GENE_VERSION: true
 ANNOTATION_FILE: null
 ANNOTATION_GENE_ID_COL: gene_id

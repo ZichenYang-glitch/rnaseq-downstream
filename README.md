@@ -2,6 +2,8 @@
 
 This repository contains a modular RNA-seq downstream workflow built around `PyDESeq2`, `GSEAPy`, optional `HOMER`, and a Snakemake execution layer.
 
+It is designed to pair cleanly with an upstream Nextflow RNA-seq pipeline by consuming merged gene-level matrices plus metadata and recording upstream provenance in the final deliverables.
+
 The current recommended mode is:
 
 ```bash
@@ -19,6 +21,7 @@ In this model:
 The workflow currently supports:
 
 - loading merged gene-level count and TPM matrices
+- recording upstream pipeline provenance from config fields or an optional manifest file
 - validating metadata, design settings, and contrasts before model fitting
 - QC with variance-stabilized counts by default
 - differential expression with `PyDESeq2`
@@ -119,6 +122,8 @@ sample_3	M2
 
 Count and TPM matrices should contain genes in rows and sample IDs in columns.
 
+This repository assumes that upstream quantification has already been completed, for example by a Nextflow RNA-seq pipeline. It starts from merged gene-level matrices rather than raw FASTQ files.
+
 ## Configuration
 
 Main runtime settings live in [`workflow_config.yaml`](workflow_config.yaml).
@@ -129,6 +134,15 @@ Important fields:
 - `TPM_FILE`: merged gene TPM matrix
 - `METADATA_FILE`: sample metadata
 - `OUTPUT_DIR`: output root directory
+- `UPSTREAM_MANIFEST`: optional YAML, JSON, or two-column table describing upstream provenance
+- `UPSTREAM_PIPELINE_NAME`: upstream workflow name
+- `UPSTREAM_PIPELINE_VERSION`: upstream workflow version
+- `UPSTREAM_PIPELINE_URL`: upstream workflow URL
+- `REFERENCE_GENOME`: reference genome used upstream
+- `ANNOTATION_RELEASE`: gene annotation release used upstream
+- `QUANTIFICATION_METHOD`: upstream quantification method
+- `COUNT_MATRIX_TYPE`: semantic label for the counts matrix
+- `TPM_MATRIX_TYPE`: semantic label for the TPM matrix
 - `ANNOTATION_FILE`: optional local annotation table for gene ID to gene name mapping
 - `ANNOTATION_GENE_ID_COL`: gene ID column in the annotation table
 - `ANNOTATION_GENE_NAME_COL`: gene name column in the annotation table
@@ -162,6 +176,12 @@ COUNTS_FILE: salmon.merged.gene_counts.tsv
 TPM_FILE: salmon.merged.gene_tpm.tsv
 METADATA_FILE: metadata.txt
 OUTPUT_DIR: Final_Analysis_Pipeline
+UPSTREAM_MANIFEST: upstream_manifest.example.yaml
+UPSTREAM_PIPELINE_NAME: nf-core/rnaseq
+UPSTREAM_PIPELINE_VERSION: "3.18.0"
+REFERENCE_GENOME: GRCm39
+ANNOTATION_RELEASE: Ensembl 110
+QUANTIFICATION_METHOD: Salmon gene-level summarization
 
 DESIGN_FACTOR: group
 REFERENCE_LEVEL: M0
@@ -180,6 +200,8 @@ RUN_GSEA: true
 RUN_MOTIF: false
 N_CPUS: 4
 ```
+
+An example upstream manifest is provided at [`upstream_manifest.example.yaml`](upstream_manifest.example.yaml).
 
 If you prefer a contrast table, point `CONTRASTS_FILE` to a TSV like [`contrasts.example.tsv`](contrasts.example.tsv):
 
@@ -252,7 +274,7 @@ Outputs are written under `OUTPUT_DIR`, by default `Final_Analysis_Pipeline/`.
 Main directories:
 
 - `00_Validation/`
-  contains validated input markers plus sample-group and contrast summaries
+  contains validated input markers plus sample-group, contrast, and upstream provenance summaries
 - `01_QC/`
   contains original and adjusted PCA outputs, correlation/distance plots, library-size and detected-gene plots, transformed matrices, sample QC metrics, and `QC_Metadata_Associations.tsv`
 - `02_DESeq2_Stats/`
@@ -262,7 +284,7 @@ Main directories:
 - `04_GSEA/`
   contains one subdirectory per contrast and gene-set library
 - `05_Summary/`
-  contains `Master_Expression_Table.csv`, `Analysis_Summary.md`, `Report_Index.md`, `Report_Index.html`, annotated heatmaps, DEG count summaries, sample outlier report, QC adjustment comparison, and GSEA summary/clustering outputs
+  contains `Master_Expression_Table.csv`, `Analysis_Summary.md`, `Report_Index.md`, `Report_Index.html`, annotated heatmaps, DEG count summaries, sample outlier report, QC adjustment comparison, GSEA summary/clustering outputs, and upstream provenance context
 - `06_Motif/`
   contains optional HOMER results
 
@@ -349,7 +371,7 @@ perl $(which configureHomer.pl) -install human
 This workflow is now solid for standard DE-driven downstream analysis, but a stronger production-grade RNA-seq stack often also includes:
 
 - explicit upstream assumptions and checks around transcript-to-gene summarization, strandedness, and annotation release
-  this repository starts at merged gene-level matrices and does not validate upstream quantification choices
+  this repository now records upstream provenance, but it still does not validate the correctness of upstream quantification choices directly
 - batch-effect visualizations before and after adjustment
   partially addressed here through adjusted PCA, but not yet through a fuller before/after correction reporting layer
 - formal sample sheet and contrast table standards with stronger schema validation

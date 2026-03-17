@@ -29,10 +29,13 @@ TPM_INPUTS = [TPM_FILE] if os.path.exists(TPM_FILE) else []
 CONFIG_INPUTS = [workflow.configfiles[0]]
 if config.get("CONTRASTS_FILE"):
     CONFIG_INPUTS.append(config["CONTRASTS_FILE"])
+if config.get("UPSTREAM_MANIFEST"):
+    CONFIG_INPUTS.append(config["UPSTREAM_MANIFEST"])
 VALIDATION_OUTPUTS = [
     f"{OUTPUT_DIR}/00_Validation/validated_inputs.txt",
     f"{OUTPUT_DIR}/00_Validation/group_summary.tsv",
     f"{OUTPUT_DIR}/00_Validation/contrast_summary.tsv",
+    f"{OUTPUT_DIR}/00_Validation/upstream_provenance.tsv",
 ]
 QC_OUTPUTS = [
     f"{OUTPUT_DIR}/01_QC/PCA_Plot.png",
