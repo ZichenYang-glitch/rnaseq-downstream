@@ -12,6 +12,7 @@ dependencies:
   - scikit-learn
   - pydeseq2
   - gseapy
+  - pyyaml
   # HOMER is optional but recommended. Uncomment if you want it pre-installed.
   # - homer 
   - pip

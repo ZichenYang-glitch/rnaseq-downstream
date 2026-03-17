@@ -47,3 +47,6 @@ deseq2_integrated_results/
 # Temporary
 *.log
 *.tmp
+
+# Workflow caches
+.snakemake/

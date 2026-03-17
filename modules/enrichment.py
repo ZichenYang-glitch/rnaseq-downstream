@@ -1,8 +1,9 @@
-import gseapy as gp
-import pandas as pd
 import os
 
-def run_gsea(results_dict, gene_sets, out_dir):
+import gseapy as gp
+
+
+def run_gsea(results_dict, gene_sets, out_dir, permutations=1000, rank_metric='stat'):
     """Runs GSEA Preranked for each contrast."""
     os.makedirs(out_dir, exist_ok=True)
     
@@ -10,10 +11,11 @@ def run_gsea(results_dict, gene_sets, out_dir):
         print(f"  Running GSEA for: {name}")
         
         # Prepare rank
-        rk = df[['log2FoldChange']].copy()
+        metric = rank_metric if rank_metric in df.columns else 'log2FoldChange'
+        rk = df[[metric]].copy()
         rk['gene'] = df.index
-        rk = rk.dropna().sort_values('log2FoldChange', ascending=False)
-        rk = rk[['gene', 'log2FoldChange']]
+        rk = rk.dropna().sort_values(metric, ascending=False)
+        rk = rk[['gene', metric]]
         
         if len(rk) < 100:
             print("    [Skip] Not enough genes.")
@@ -24,6 +26,7 @@ def run_gsea(results_dict, gene_sets, out_dir):
                 gp.prerank(rnk=rk, 
                            gene_sets=gs, 
                            outdir=os.path.join(out_dir, name, gs),
+                           permutation_num=permutations,
                            format='png', 
                            seed=42, 
                            verbose=False)

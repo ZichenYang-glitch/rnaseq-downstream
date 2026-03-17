@@ -1,0 +1,4 @@
+factor	treatment	control	name
+group	M1	M0	M1_vs_M0
+group	M2	M0	M2_vs_M0
+group	M1	M2	M1_vs_M2
