@@ -3,11 +3,30 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
 .env
 .venv
 env/
 venv/
 .ipynb_checkpoints/
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Test, coverage, and static-analysis artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.testmondata
 
 # IDEs
 .vscode/
@@ -31,8 +50,16 @@ venv/
 *.tsv
 *.txt
 *.csv
-!metadata.txt  # Keep example metadata if small
-!config.py     # Keep config
+!metadata.txt
+!*.example.tsv
+!*.example.txt
+!*.example.csv
+
+# Test fixtures are intentionally reviewable and versioned, including tabular files.
+!tests/
+!tests/**
+tests/**/__pycache__/
+tests/**/*.py[cod]
 
 # Output Directories
 Final_Analysis_Pipeline/
@@ -47,6 +74,15 @@ deseq2_integrated_results/
 # Temporary
 *.log
 *.tmp
+
+# R and renv local state (lockfiles and project metadata remain tracked)
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+renv/library/
+renv/staging/
+renv/python/
 
 # Workflow caches
 .snakemake/

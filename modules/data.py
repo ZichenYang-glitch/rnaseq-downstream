@@ -1,9 +1,10 @@
 import pandas as pd
-import sys
 import os
 import json
 
 import yaml
+
+from rnaseq_downstream.errors import InputReadError
 
 
 def normalize_gene_ids(index, strip_gene_version=True):
@@ -199,9 +200,14 @@ def load_metadata(path, design_col):
             raise ValueError(f"Missing values found in design column '{design_col}'.")
             
         return df
-    except Exception as e:
-        print(f"[Error] Loading metadata: {e}")
-        sys.exit(1)
+    except Exception as error:
+        raise InputReadError(
+            "Failed to load metadata input.",
+            path=path,
+            operation="load_metadata",
+            cause=error,
+            details={"design_column": design_col},
+        ) from error
 
 def load_counts(path, metadata_samples, min_counts=10, strip_gene_version=True):
     """Loads counts, aligns with metadata, and filters."""
@@ -218,9 +224,13 @@ def load_counts(path, metadata_samples, min_counts=10, strip_gene_version=True):
         df = df[df.sum(axis=1) >= min_counts]
         
         return df.T  # Return samples x genes
-    except Exception as e:
-        print(f"[Error] Loading counts: {e}")
-        sys.exit(1)
+    except Exception as error:
+        raise InputReadError(
+            "Failed to load count input.",
+            path=path,
+            operation="load_counts",
+            cause=error,
+        ) from error
 
 
 def validate_analysis_inputs(metadata, design_col, reference_levels, contrasts):
