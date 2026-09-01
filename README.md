@@ -1,14 +1,17 @@
 # RNA-seq Downstream Toolkit
 
-> **Status: research preview.** The repository is currently building its engineering and reproducibility foundation. No statistical analysis path in this checkpoint has completed the planned evidence gates. Do not use the current outputs as a substitute for independent statistical review.
+> **Status: research preview.** Input semantics can now be inspected and validated, but no statistical analysis path has completed the planned design, backend, oracle, or simulation gates. Do not use the current outputs as a substitute for independent statistical review.
 
 This project is evolving from a Python-led bulk RNA-seq workflow into a small, auditable toolkit with an agent-friendly command-line contract. The immediate goal is one narrow P0 path whose input semantics, statistical execution, failures, and benchmark evidence can all be inspected by software as well as by a person.
 
-This checkpoint covers only:
+The completed foundation and checkpoint-A work covers:
 
 - an installable Python package and non-interactive JSON CLI contract;
 - stable, machine-readable error handling at the CLI boundary;
 - a two-layer environment-locking foundation; and
+- strict, provenance-backed validation for the three declared P0 input semantics;
+- corrected stable-ID, integer-count, sample-alignment, PCA, and visualization-only
+  covariate-adjustment behavior in the retained experimental workflow; and
 - unit, integration, oracle, and simulation test entry points.
 
 It does **not** implement or certify the planned edgeR analysis path yet.
@@ -25,13 +28,17 @@ The planned path is:
 declared input semantics -> tximport where appropriate -> edgeR v4 QL -> structured results and evidence
 ```
 
-It will accept only explicitly declared, provenance-backed inputs and will use stable gene IDs internally. Design and contrast estimability checks, transcript-length offsets, edgeR QL fitting, threshold tests, per-gene test states, and benchmark gates belong to later P0 work items. None of those scientific capabilities should be inferred from the presence of the current CLI commands or environment files.
+The input gate now accepts only explicitly declared, provenance-backed inputs and uses stable gene IDs internally. It records the required future route, including transcript-length-offset semantics, but does not yet execute that route. Design and contrast estimability checks, edgeR QL fitting, threshold tests, per-gene test states, and benchmark gates belong to checkpoint B. None of those scientific capabilities should be inferred from a successful input-only validation.
 
 ### Retained experimental legacy workflow
 
 The existing `PyDESeq2`/`GSEAPy`/Snakemake workflow remains in the repository so its behavior can be reviewed and migrated incrementally. It is experimental and is outside the P0 evidence-gated DAG.
 
-In particular, the legacy path still starts from merged gene-level matrices and includes known input-semantics, identifier, PCA, and covariate-adjustment issues scheduled for later work. Its reports and statistical outputs are not evidence that the planned P0 path has passed validation. Optional HOMER support is also legacy functionality, not a core P0 capability.
+Checkpoint A removed the known silent missing-value fill, rounding, display-symbol aggregation, sample-set intersection, scaled PCA, and incorrect nuisance-only residualization from this retained path. PCA now uses the top positive-variance genes after the selected transform, centers without feature scaling, and records method/feature evidence. Adjusted PCA uses a joint biology-plus-nuisance model and refuses completely confounded designs. These are bug fixes to an **experimental** PyDESeq2 workflow, not certification of its differential-expression results. The historical HOMER helper was removed from the core CLI and Snakemake DAG and retained only under `extras/homer/` as unsupported reference code.
+
+Corrected PCA and adjusted-PCA values intentionally differ from legacy output. The workflow refuses to overwrite legacy PCA artifacts that lack current method evidence; archive old result directories before rerunning. The duplicated `run_integrated_pydeseq2.py` entry point is fail-closed because it bypassed these corrections.
+
+The legacy config still names `salmon.merged.gene_counts.tsv` as a compatibility placeholder. It now hard-fails if that file contains fractional estimated counts, and the P0 input gate rejects it regardless because a bare merged matrix cannot prove whether a transcript-length offset is required.
 
 ## Install the Foundation Package
 
@@ -52,12 +59,12 @@ The package installation exposes the machine contract; it does not make the lega
 
 ## CLI Contract
 
-The reserved command surface is:
+The command surface is:
 
 ```text
 rnaseq-downstream capabilities
-rnaseq-downstream inspect
-rnaseq-downstream validate
+rnaseq-downstream inspect --request REQUEST.json
+rnaseq-downstream validate --request REQUEST.json --output-dir EVIDENCE_DIR
 rnaseq-downstream run
 rnaseq-downstream summarize
 ```
@@ -73,7 +80,20 @@ The contract is intentionally suitable for shell scripts and general-purpose cod
 
 The normative field and exit-code definitions are in the [CLI JSON contract](docs/contracts/cli-v1.md).
 
-At this checkpoint, only `capabilities` is operational. It exits `0` with `status: "success"` and describes the current surface. `inspect`, `validate`, `run`, and `summarize` are reserved for subsequent P0 work and deliberately fail with:
+`capabilities`, `inspect`, and input-only `validate` are operational. `inspect` is read-only. `validate` performs the strict numeric checks and publishes `validated_request.json`, `input_plan.json`, `provenance.json`, and a digest-bearing `bundle_manifest.json` as one non-overwriting bundle. Both commands explicitly report `design: "not_run"`, `backend: "not_run"`, `runnable: false`, and `analysis_path_certified: false`.
+
+The three accepted semantics are:
+
+- `featurecounts_integer`, backed by original per-sample files or a typed,
+  digest-bound combined-matrix manifest;
+- `salmon_quant_dirs_full_length`, planned for tximport original counts plus
+  length offset and `edgeR::DGEListFromTximport`; and
+- `salmon_quant_dirs_three_prime`, requiring `assay_protocol: three_prime` and
+  planned to use raw `txi$counts` without a length offset.
+
+The normative request schema and templates are in the [input request contract](docs/contracts/input-request-v1.md). A bare merged Salmon gene-count matrix is rejected; input origin is never guessed from a filename or dtype.
+
+`run` and `summarize` remain reserved and deliberately fail with:
 
 ```json
 {
@@ -86,7 +106,7 @@ At this checkpoint, only `capabilities` is operational. It exits `0` with `statu
 }
 ```
 
-The actual response contains the complete envelope described above. These reserved commands exit `2`; they must never be treated as successful analysis. Invalid CLI arguments likewise exit `2`, using `INVALID_REQUEST`.
+The actual response contains the complete envelope described above. These reserved commands exit `2`; they must never be treated as successful analysis. Invalid CLI arguments likewise exit `2`, using `INVALID_REQUEST`. Scientific input-validation failures exit `3` with a specific structured error code.
 
 ## Reproducible Environment Strategy
 
@@ -111,7 +131,7 @@ tests/
 └── simulation/   # FDR/TPR gates (future P0 work)
 ```
 
-At this checkpoint the unit and integration layers exercise the foundation. Oracle and simulation entry points are scaffolds only; their existence does not mean the scientific gates have run or passed.
+At this checkpoint the unit and integration layers exercise the foundation, input semantics, and process boundary. Oracle and simulation entry points are scaffolds only; their existence does not mean the scientific gates have run or passed.
 
 Run the available foundation checks from the locked P0 Conda environment with:
 
@@ -119,6 +139,11 @@ Run the available foundation checks from the locked P0 Conda environment with:
 python -m pip install --no-deps --no-build-isolation -e .
 python -m pytest tests/unit tests/integration
 ```
+
+The approved P0 lock is intentionally toolchain-only on the Python side and does
+not add NumPy/Pandas/PyDESeq2 for the retained legacy workflow. NumPy-only QC
+math tests therefore run in a separately reported scientific-dependency lane;
+they are not evidence that the legacy path is certified or exactly locked.
 
 ## Legacy Workflow Reference
 
@@ -153,7 +178,6 @@ python main.py
 python main.py --step qc
 python main.py --step deseq
 python main.py --step gsea
-python main.py --step motif
 python main.py --step report
 ```
 
@@ -162,11 +186,11 @@ This checkpoint retains that execution surface as-is and does not validate it.
 
 ## Roadmap to the First Evidence-Gated Path
 
-Subsequent P0 work will add, in order:
+Checkpoint B will add, in order:
 
-1. corrections for known legacy data handling and QC errors;
-2. explicit, provenance-backed input semantics;
-3. an independent Rscript edgeR QL backend with hard design-lint failures; and
-4. same-environment oracle parity plus negative-binomial FDR/TPR simulation gates.
+1. an independent Rscript edgeR v4 QL backend with hard design-lint failures;
+   and
+2. same-environment oracle parity plus negative-binomial FDR/TPR simulation
+   gates and machine-readable benchmark evidence.
 
 Until those gates are implemented, executed, and archived as machine-readable benchmark reports, the repository remains a research preview.
