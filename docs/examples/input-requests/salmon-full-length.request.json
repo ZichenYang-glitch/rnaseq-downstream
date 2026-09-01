@@ -1,0 +1,33 @@
+{
+  "gene_id": {
+    "strip_version": false
+  },
+  "input_semantics": "salmon_quant_dirs_full_length",
+  "metadata": {
+    "path": "metadata.tsv",
+    "sample_id_column": "sample_id"
+  },
+  "producer": {
+    "name": "Salmon",
+    "version": "1.10.3"
+  },
+  "reference": {
+    "name": "GENCODE",
+    "source": "reference/transcripts.fa",
+    "version": "M36"
+  },
+  "salmon": {
+    "tx2gene": "reference/tx2gene.tsv"
+  },
+  "samples": [
+    {
+      "quant_dir": "salmon/sample_a",
+      "sample_id": "sample_a"
+    },
+    {
+      "quant_dir": "salmon/sample_b",
+      "sample_id": "sample_b"
+    }
+  ],
+  "schema_version": "1.0"
+}

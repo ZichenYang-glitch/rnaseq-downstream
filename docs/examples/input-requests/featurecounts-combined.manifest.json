@@ -1,0 +1,26 @@
+{
+  "artifact": {
+    "path": "counts.tsv",
+    "sha256": "REPLACE_WITH_COUNTS_TSV_SHA256"
+  },
+  "artifact_type": "featurecounts_integer_matrix",
+  "display_columns": [
+    "gene_name"
+  ],
+  "gene_id_column": "gene_id",
+  "producer": {
+    "name": "featureCounts",
+    "version": "2.0.6"
+  },
+  "reference": {
+    "name": "GENCODE",
+    "sha256": "REPLACE_WITH_REFERENCE_SHA256",
+    "source": "reference/transcripts.fa",
+    "version": "M36"
+  },
+  "sample_columns": [
+    "sample_a",
+    "sample_b"
+  ],
+  "schema_version": "1.0"
+}

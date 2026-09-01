@@ -1,0 +1,33 @@
+{
+  "featurecounts": {
+    "layout": "combined_matrix",
+    "manifest": "featurecounts-combined.manifest.json",
+    "matrix": "counts.tsv"
+  },
+  "gene_id": {
+    "strip_version": false
+  },
+  "input_semantics": "featurecounts_integer",
+  "metadata": {
+    "path": "metadata.tsv",
+    "sample_id_column": "sample_id"
+  },
+  "producer": {
+    "name": "featureCounts",
+    "version": "2.0.6"
+  },
+  "reference": {
+    "name": "GENCODE",
+    "source": "reference/transcripts.fa",
+    "version": "M36"
+  },
+  "samples": [
+    {
+      "sample_id": "sample_a"
+    },
+    {
+      "sample_id": "sample_b"
+    }
+  ],
+  "schema_version": "1.0"
+}
