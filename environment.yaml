@@ -13,8 +13,6 @@ dependencies:
   - pydeseq2
   - gseapy
   - pyyaml
-  # HOMER is optional but recommended. Uncomment if you want it pre-installed.
-  # - homer 
   - pip
   - pip:
     # Add any pip-specific packages here if needed

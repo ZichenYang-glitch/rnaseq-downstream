@@ -20,11 +20,12 @@ def main():
         gene_name_col=cfg.ANNOTATION_GENE_NAME_COL,
         strip_gene_version=cfg.STRIP_GENE_VERSION,
     )
-    counts_T = data.load_counts(
+    counts_T, count_annotation_df = data.load_counts(
         cfg.COUNTS_FILE,
         meta.index,
         cfg.MIN_COUNTS,
         strip_gene_version=cfg.STRIP_GENE_VERSION,
+        return_gene_annotations=True,
     )
 
     results = {}
@@ -45,6 +46,7 @@ def main():
         os.path.join(cfg.OUTPUT_DIR, '05_Summary'),
         strip_gene_version=cfg.STRIP_GENE_VERSION,
         annotation_df=annotation_df,
+        count_annotation_df=count_annotation_df,
     )
     report.create_analysis_summary(
         meta,

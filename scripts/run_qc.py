@@ -25,9 +25,11 @@ def main():
         design=cfg.DESIGN,
         continuous_factors=cfg.CONTINUOUS_FACTORS,
         transform=cfg.QC_TRANSFORM,
+        biology_factors=cfg.QC_BIOLOGY_FACTORS,
         adjust_factors=cfg.QC_ADJUST_FACTORS,
         use_design=cfg.VST_USE_DESIGN,
         label_samples=cfg.QC_LABEL_SAMPLES,
+        pca_top_n=cfg.QC_PCA_TOP_N,
         n_cpus=cfg.N_CPUS,
     )
 

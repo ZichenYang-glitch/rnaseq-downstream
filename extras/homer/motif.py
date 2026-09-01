@@ -1,3 +1,5 @@
+"""Legacy HOMER helpers retained outside the core toolkit and default DAG."""
+
 import os
 import subprocess
 import shutil

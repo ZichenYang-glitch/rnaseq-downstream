@@ -4,7 +4,9 @@ import os
 import pandas as pd
 
 import config as cfg
-from modules import data, motif
+from modules import data
+
+from motif import run_motif_analysis
 
 
 def main():
@@ -18,7 +20,7 @@ def main():
             raise FileNotFoundError(f"Missing DESeq2 result: {path}")
         results[name] = pd.read_csv(path, index_col=0)
 
-    motif.run_motif_analysis(
+    run_motif_analysis(
         results,
         os.path.join(cfg.OUTPUT_DIR, '06_Motif'),
         cfg.HOMER_SPECIES,

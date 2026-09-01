@@ -7,12 +7,17 @@ matplotlib.use('Agg') # Set non-interactive backend
 import config as cfg
 
 # Import modules
-from modules import data, deseq, enrichment, report, motif
+from modules import data, deseq, enrichment, report
 
 def main():
     parser = argparse.ArgumentParser(description="RNA-seq Downstream Analysis Pipeline")
-    parser.add_argument('--step', type=str, choices=['all', 'qc', 'deseq', 'gsea', 'motif', 'report'], 
-                        default='all', help="Analysis step to run.")
+    parser.add_argument(
+        '--step',
+        type=str,
+        choices=['all', 'qc', 'deseq', 'gsea', 'report'],
+        default='all',
+        help="Analysis step to run.",
+    )
     args = parser.parse_args()
     
     print("=== RNA-seq Pipeline Started ===")
@@ -31,11 +36,12 @@ def main():
         gene_name_col=cfg.ANNOTATION_GENE_NAME_COL,
         strip_gene_version=cfg.STRIP_GENE_VERSION,
     )
-    counts_T = data.load_counts(
+    counts_T, count_annotation_df = data.load_counts(
         cfg.COUNTS_FILE,
         meta.index,
         cfg.MIN_COUNTS,
         strip_gene_version=cfg.STRIP_GENE_VERSION,
+        return_gene_annotations=True,
     )
     print(f"    Loaded {counts_T.shape[0]} samples, {counts_T.shape[1]} genes.")
     
@@ -45,7 +51,6 @@ def main():
         'deseq': os.path.join(cfg.OUTPUT_DIR, '02_DESeq2_Stats'),
         'plots': os.path.join(cfg.OUTPUT_DIR, '03_Volcano_Plots'),
         'gsea': os.path.join(cfg.OUTPUT_DIR, '04_GSEA'),
-        'motif': os.path.join(cfg.OUTPUT_DIR, '06_Motif'),
         'report': os.path.join(cfg.OUTPUT_DIR, '05_Summary')
     }
     
@@ -60,16 +65,18 @@ def main():
             design=cfg.DESIGN,
             continuous_factors=cfg.CONTINUOUS_FACTORS,
             transform=cfg.QC_TRANSFORM,
+            biology_factors=cfg.QC_BIOLOGY_FACTORS,
             adjust_factors=cfg.QC_ADJUST_FACTORS,
             use_design=cfg.VST_USE_DESIGN,
             label_samples=cfg.QC_LABEL_SAMPLES,
+            pca_top_n=cfg.QC_PCA_TOP_N,
             n_cpus=cfg.N_CPUS,
         )
         if args.step == 'qc': sys.exit(0)
         
     # 3. DESeq2
     results = {}
-    if args.step in ['all', 'deseq', 'gsea', 'motif', 'report']:
+    if args.step in ['all', 'deseq', 'gsea', 'report']:
         # Check if we can load existing results or need to run
         if args.step == 'deseq' or args.step == 'all' or not os.path.exists(dirs['deseq']):
             print("[3] Running DESeq2...")
@@ -121,12 +128,7 @@ def main():
             cfg.GSEA_RANK_METRIC,
         )
         
-    # 5. Motif Analysis
-    if args.step in ['all', 'motif'] and cfg.RUN_MOTIF:
-        print("[5] Running Motif Analysis (HOMER)...")
-        motif.run_motif_analysis(results, dirs['motif'], cfg.HOMER_SPECIES, cfg.PADJ_THRESH, cfg.LOGFC_THRESH)
-
-    # 6. Report
+    # 5. Report
     if args.step in ['all', 'report']:
         print("[6] Generating Report...")
         report.create_master_table(
@@ -138,6 +140,7 @@ def main():
             dirs['report'],
             strip_gene_version=cfg.STRIP_GENE_VERSION,
             annotation_df=annotation_df,
+            count_annotation_df=count_annotation_df,
         )
         report.create_analysis_summary(
             meta,

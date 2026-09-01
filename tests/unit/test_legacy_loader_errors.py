@@ -9,7 +9,6 @@ from typing import Any
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_MODULE = PROJECT_ROOT / "modules" / "data.py"
 DATA_SOURCE = DATA_MODULE.read_text(encoding="utf-8")
@@ -41,7 +40,7 @@ def test_legacy_data_module_has_no_process_exit_calls() -> None:
 
 
 @pytest.mark.unit
-def test_loader_failure_paths_raise_typed_chained_errors_without_printing() -> None:
+def test_loader_failure_paths_are_narrow_and_never_print() -> None:
     loaders = _loader_nodes()
     assert set(loaders) == LOADER_NAMES
 
@@ -53,20 +52,16 @@ def test_loader_failure_paths_raise_typed_chained_errors_without_printing() -> N
             and isinstance(node.func, ast.Name)
             and node.func.id == "print"
         ]
-        chained_input_errors = [
+        broad_handlers = [
             node
             for node in ast.walk(function)
-            if isinstance(node, ast.Raise)
-            and isinstance(node.exc, ast.Call)
-            and isinstance(node.exc.func, ast.Name)
-            and node.exc.func.id == "InputReadError"
-            and node.cause is not None
+            if isinstance(node, ast.ExceptHandler)
+            and isinstance(node.type, ast.Name)
+            and node.type.id == "Exception"
         ]
 
         assert print_calls == [], f"{name} must not print library errors"
-        assert len(chained_input_errors) == 1, (
-            f"{name} must raise exactly one chained InputReadError"
-        )
+        assert broad_handlers == [], f"{name} must not relabel semantic failures as I/O"
 
 
 @pytest.mark.unit

@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import pandas as pd
 import numpy as np
@@ -5,11 +7,34 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
-from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances, silhouette_score
-from sklearn.preprocessing import StandardScaler
 
 from modules import data
+from rnaseq_downstream.errors import QCValidationError
+from rnaseq_downstream.qc_math import (
+    PCA_METHOD_ID,
+    FactorSpec,
+    build_joint_design,
+    centered_unscaled_pca,
+    metadata_reorder_indices,
+    remove_nuisance_effects,
+    resolve_adjustment_biology_factors,
+    select_top_variable_features,
+    validate_factor_names,
+)
+
+
+_PCA_METHOD_FILE = 'QC_PCA_Method.json'
+_PCA_SELECTED_GENES_FILE = 'QC_PCA_Selected_Genes.tsv'
+_CORRECTED_PCA_ARTIFACTS = (
+    'QC_Adjusted_Transformed_Counts.tsv',
+    'PCA_Coordinates.tsv',
+    'PCA_Explained_Variance.tsv',
+    'PCA_Plot.png',
+    'Adjusted_PCA_Coordinates.tsv',
+    'Adjusted_PCA_Explained_Variance.tsv',
+    'Adjusted_PCA_Plot.png',
+)
 
 def _get_transformed_counts(
     counts_T,
@@ -35,7 +60,14 @@ def _get_transformed_counts(
     if transform == 'log1p':
         return np.log1p(counts_T)
 
-    raise ValueError(f"Unsupported QC transform: {transform}")
+    raise QCValidationError(
+        "The requested QC transform is not supported.",
+        details={
+            "reason": "unsupported_qc_transform",
+            "transform": str(transform),
+            "supported": ["vst", "log1p"],
+        },
+    )
 
 
 def run_qc(
@@ -50,9 +82,46 @@ def run_qc(
     use_design=False,
     label_samples=False,
     n_cpus=4,
+    pca_top_n=500,
+    biology_factors=None,
 ):
-    """Generates PCA, sample correlations, and the transformed expression matrix used for QC."""
+    """Generate experimental visualization-only QC artifacts.
+
+    PCA genes are selected once from the unadjusted transformed matrix and the
+    identical stable gene IDs are reused for ordinary and adjusted PCA.  These
+    coordinates are not inputs to differential-expression testing.
+    """
+    nuisance_factors = (
+        [adjust_factors]
+        if isinstance(adjust_factors, str)
+        else list(adjust_factors or [])
+    )
+    requested_biology_factors = (
+        [biology_factors]
+        if isinstance(biology_factors, str)
+        else list(biology_factors or [design_col])
+    )
+    continuous_factor_names = (
+        [continuous_factors]
+        if isinstance(continuous_factors, str)
+        else list(continuous_factors or [])
+    )
+    if nuisance_factors:
+        protected_biology_factors = list(
+            resolve_adjustment_biology_factors(
+                design or f"~ {design_col}",
+                design_col,
+                requested_biology_factors,
+                nuisance_factors,
+            )
+        )
+    else:
+        protected_biology_factors = [design_col]
+        for factor in requested_biology_factors:
+            if factor not in protected_biology_factors:
+                protected_biology_factors.append(factor)
     os.makedirs(out_dir, exist_ok=True)
+    metadata = _align_qc_metadata(counts_T.index, metadata)
     transformed = _get_transformed_counts(
         counts_T,
         metadata,
@@ -61,6 +130,39 @@ def run_qc(
         transform=transform,
         use_design=use_design,
         n_cpus=n_cpus,
+    )
+    metadata = _align_qc_metadata(transformed.index, metadata)
+    selection = select_top_variable_features(
+        transformed.to_numpy(dtype=float),
+        transformed.columns,
+        pca_top_n,
+    )
+    if len(selection.names) < 2:
+        raise QCValidationError(
+            "QC PCA requires at least two positive-variance genes.",
+            details={
+                "reason": "insufficient_pca_dimensions",
+                "selected_gene_count": len(selection.names),
+            },
+        )
+    _guard_corrected_pca_outputs(out_dir)
+    adjusted, adjustment_design = _residualize_covariates(
+        transformed,
+        metadata,
+        nuisance_factors,
+        protected_biology_factors,
+        continuous_factor_names,
+        return_design=True,
+    )
+    _write_pca_evidence(
+        out_dir,
+        selection,
+        transform=transform,
+        requested_top_n=pca_top_n,
+        adjust_factors=nuisance_factors,
+        biology_factors=protected_biology_factors,
+        continuous_factors=continuous_factor_names,
+        adjustment_design=adjustment_design,
     )
     transformed.to_csv(os.path.join(out_dir, 'QC_Transformed_Counts.tsv'), sep='\t')
 
@@ -86,31 +188,16 @@ def run_qc(
     plt.savefig(os.path.join(out_dir, 'Detected_Genes.png'), dpi=300)
     plt.close()
     
-    # PCA
-    pca = PCA(n_components=2)
-    scaled = StandardScaler().fit_transform(transformed)
-    coords = pca.fit_transform(scaled)
-    pca_df = pd.DataFrame(coords, index=metadata.index, columns=['PC1', 'PC2'])
-    pca_df = pd.concat([pca_df, metadata], axis=1)
-    pca_df.to_csv(os.path.join(out_dir, 'PCA_Coordinates.tsv'), sep='\t')
-    pd.DataFrame({
-        'component': ['PC1', 'PC2'],
-        'explained_variance_ratio': pca.explained_variance_ratio_,
-    }).to_csv(os.path.join(out_dir, 'PCA_Explained_Variance.tsv'), sep='\t', index=False)
-    
-    plt.figure(figsize=(8,6))
-    sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue=design_col, style=design_col, s=150)
-    if label_samples:
-        for sample_id, row in pca_df[['PC1', 'PC2']].iterrows():
-            plt.text(row['PC1'], row['PC2'], str(sample_id), fontsize=8)
-    plt.title(
-        f"PCA ({transform.upper()}): "
-        f"PC1 {pca.explained_variance_ratio_[0]:.1%}, "
-        f"PC2 {pca.explained_variance_ratio_[1]:.1%}"
+    selected_genes = list(selection.names)
+    pca_df, _ = _save_pca_outputs(
+        transformed.loc[:, selected_genes],
+        metadata,
+        design_col,
+        out_dir,
+        prefix='PCA',
+        title_prefix=f'PCA ({transform.upper()})',
+        label_samples=label_samples,
     )
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, 'PCA_Plot.png'), dpi=300)
-    plt.close()
     
     # Correlation
     corr = transformed.T.corr()
@@ -139,9 +226,10 @@ def run_qc(
     pcs = pca_df[['PC1', 'PC2']]
     for col in metadata.columns:
         series = metadata[col]
-        if pd.api.types.is_numeric_dtype(series):
-            assoc_pc1 = abs(series.corr(pcs['PC1']))
-            assoc_pc2 = abs(series.corr(pcs['PC2']))
+        if col in continuous_factor_names:
+            numeric_series = pd.to_numeric(series, errors='raise')
+            assoc_pc1 = abs(numeric_series.corr(pcs['PC1']))
+            assoc_pc2 = abs(numeric_series.corr(pcs['PC2']))
             association_rows.append({
                 'factor': col,
                 'type': 'continuous',
@@ -171,10 +259,9 @@ def run_qc(
             index=False,
         )
 
-    adjusted = _residualize_covariates(transformed, metadata, adjust_factors or [], design_col)
     adjusted.to_csv(os.path.join(out_dir, 'QC_Adjusted_Transformed_Counts.tsv'), sep='\t')
     _save_pca_outputs(
-        adjusted,
+        adjusted.loc[:, selected_genes],
         metadata,
         design_col,
         out_dir,
@@ -184,43 +271,227 @@ def run_qc(
     )
 
 
-def _residualize_covariates(transformed, metadata, adjust_factors, design_col):
-    factors = [factor for factor in adjust_factors if factor in metadata.columns and factor != design_col]
+def _align_qc_metadata(sample_ids, metadata):
+    reorder = metadata_reorder_indices(sample_ids, metadata.index)
+    aligned = metadata.iloc[reorder].copy()
+    aligned.index = pd.Index(sample_ids, name=metadata.index.name)
+    return aligned
+
+
+def _guard_corrected_pca_outputs(out_dir):
+    existing = [
+        name
+        for name in _CORRECTED_PCA_ARTIFACTS
+        if os.path.exists(os.path.join(out_dir, name))
+    ]
+    method_path = os.path.join(out_dir, _PCA_METHOD_FILE)
+    selected_path = os.path.join(out_dir, _PCA_SELECTED_GENES_FILE)
+    if not existing and not os.path.exists(method_path):
+        return
+    if not os.path.exists(method_path):
+        raise QCValidationError(
+            "Refusing to overwrite legacy PCA artifacts without method provenance.",
+            details={
+                "reason": "legacy_pca_output_conflict",
+                "existing_artifacts": existing,
+                "required_provenance": method_path,
+                "recovery": "Archive or remove the old QC directory before rerunning.",
+            },
+        )
+    try:
+        with open(method_path, 'r', encoding='utf-8') as handle:
+            provenance = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise QCValidationError(
+            "Refusing to overwrite PCA artifacts because provenance is unreadable.",
+            details={
+                "reason": "pca_provenance_unreadable",
+                "provenance_path": method_path,
+                "cause_type": type(exc).__name__,
+                "cause_message": str(exc),
+            },
+            cause=exc,
+        ) from exc
+    if provenance.get('method_id') != PCA_METHOD_ID:
+        raise QCValidationError(
+            "Refusing to overwrite PCA artifacts from a different or legacy method.",
+            details={
+                "reason": "pca_method_conflict",
+                "provenance_path": method_path,
+                "observed_method_id": provenance.get('method_id'),
+                "required_method_id": PCA_METHOD_ID,
+            },
+        )
+    if existing and not os.path.exists(selected_path):
+        raise QCValidationError(
+            "Refusing to overwrite PCA artifacts without selected-gene evidence.",
+            details={
+                "reason": "pca_selection_evidence_missing",
+                "required_evidence": selected_path,
+                "existing_artifacts": existing,
+            },
+        )
+
+
+def _write_pca_evidence(
+    out_dir,
+    selection,
+    *,
+    transform,
+    requested_top_n,
+    adjust_factors,
+    biology_factors,
+    continuous_factors,
+    adjustment_design,
+):
+    selected_rows = pd.DataFrame({
+        'rank': np.arange(1, len(selection.names) + 1, dtype=int),
+        'gene_id': selection.names,
+        'sample_variance_unadjusted': selection.variances,
+    })
+    selected_rows.to_csv(
+        os.path.join(out_dir, _PCA_SELECTED_GENES_FILE),
+        sep='\t',
+        index=False,
+    )
+    selected_digest = hashlib.sha256(
+        ''.join(f'{gene_id}\n' for gene_id in selection.names).encode('utf-8')
+    ).hexdigest()
+    continuous = set(continuous_factors)
+    factor_semantics = [
+        {
+            'factor': factor,
+            'role': role,
+            'kind': 'numeric' if factor in continuous else 'categorical',
+        }
+        for role, factors in (
+            ('biology', biology_factors),
+            ('nuisance', adjust_factors),
+        )
+        for factor in factors
+    ]
+    provenance = {
+        'schema_version': '1.0',
+        'status': 'experimental',
+        'analysis_role': 'visualization_only',
+        'method_id': PCA_METHOD_ID,
+        'transform': str(transform),
+        'selection_source': 'unadjusted_transformed_expression',
+        'selection_rule': 'top_positive_sample_variance',
+        'selection_variance_ddof': 1,
+        'requested_top_n': int(requested_top_n),
+        'selected_gene_count': len(selection.names),
+        'selected_gene_sha256': selected_digest,
+        'ordinary_and_adjusted_pca_reuse_exact_gene_ids': True,
+        'pca_center': True,
+        'pca_scale': False,
+        'pca_components': 2,
+        'pca_implementation': 'numpy.linalg.svd',
+        'biology_factors': list(biology_factors),
+        'nuisance_factors': list(adjust_factors),
+        'factor_semantics': factor_semantics,
+        'adjustment_applied': bool(adjust_factors),
+        'biology_design_columns': (
+            list(adjustment_design.biology_columns)
+            if adjustment_design is not None
+            else []
+        ),
+        'nuisance_design_columns': (
+            list(adjustment_design.nuisance_columns)
+            if adjustment_design is not None
+            else []
+        ),
+        'joint_design_rank': (
+            int(adjustment_design.rank) if adjustment_design is not None else None
+        ),
+        'joint_design_residual_df': (
+            int(adjustment_design.residual_df)
+            if adjustment_design is not None
+            else None
+        ),
+        'categorical_biology_encoding': 'treatment_contrasts',
+        'categorical_nuisance_encoding': 'limma_style_sum_contrasts',
+        'numeric_nuisance_encoding': 'sample_mean_centered',
+        'adjustment_model': (
+            'Y = X_biology B + X_nuisance Gamma + E; '
+            'subtract X_nuisance Gamma only'
+        ),
+        'adjusted_values_enter_differential_expression': False,
+    }
+    with open(os.path.join(out_dir, _PCA_METHOD_FILE), 'w', encoding='utf-8') as handle:
+        json.dump(provenance, handle, indent=2, sort_keys=True, allow_nan=False)
+        handle.write('\n')
+
+
+def _residualize_covariates(
+    transformed,
+    metadata,
+    adjust_factors,
+    biology_factors,
+    continuous_factors,
+    *,
+    return_design=False,
+):
+    """Remove nuisance terms from a joint model for visualization only."""
+
+    metadata = _align_qc_metadata(transformed.index, metadata)
+    factors = list(adjust_factors)
     if not factors:
-        return transformed.copy()
+        unchanged = transformed.copy()
+        return (unchanged, None) if return_design else unchanged
+    biology = (
+        [biology_factors]
+        if isinstance(biology_factors, str)
+        else list(biology_factors)
+    )
+    continuous = set(continuous_factors)
+    validate_factor_names(metadata.columns, biology, factors)
 
-    nuisance_parts = []
-    for factor in factors:
+    def factor_spec(factor):
         series = metadata[factor]
-        if pd.api.types.is_numeric_dtype(series):
-            nuisance_parts.append(series.astype(float).rename(factor))
-        else:
-            nuisance_parts.append(pd.get_dummies(series.astype(str), prefix=factor, drop_first=True))
+        if series.isna().any():
+            raise QCValidationError(
+                f"Factor '{factor}' contains missing values.",
+                details={"reason": "missing_factor_value", "factor": factor},
+            )
+        is_numeric = factor in continuous
+        kind = 'numeric' if is_numeric else 'categorical'
+        values = series.astype(object).to_numpy()
+        return FactorSpec(factor, values, kind)
 
-    if not nuisance_parts:
-        return transformed.copy()
+    design = build_joint_design(
+        [factor_spec(factor) for factor in biology],
+        [factor_spec(factor) for factor in factors],
+    )
+    adjusted = remove_nuisance_effects(
+        transformed.to_numpy(dtype=float),
+        design,
+    )
+    adjusted_frame = pd.DataFrame(
+        adjusted,
+        index=transformed.index.copy(),
+        columns=transformed.columns.copy(),
+    )
+    return (adjusted_frame, design) if return_design else adjusted_frame
 
-    nuisance = pd.concat(nuisance_parts, axis=1)
-    if nuisance.empty:
-        return transformed.copy()
 
-    X = nuisance.astype(float).values
-    Y = transformed.loc[metadata.index].values
-    beta, _, _, _ = np.linalg.lstsq(X, Y, rcond=None)
-    adjusted = Y - X @ beta + Y.mean(axis=0, keepdims=True)
-    return pd.DataFrame(adjusted, index=transformed.index, columns=transformed.columns)
-
-
-def _save_pca_outputs(transformed, metadata, design_col, out_dir, prefix, title_prefix, label_samples=False):
-    pca = PCA(n_components=2)
-    scaled = StandardScaler().fit_transform(transformed)
-    coords = pca.fit_transform(scaled)
-    pca_df = pd.DataFrame(coords, index=metadata.index, columns=['PC1', 'PC2'])
+def _save_pca_outputs(
+    transformed,
+    metadata,
+    design_col,
+    out_dir,
+    prefix,
+    title_prefix,
+    label_samples=False,
+):
+    metadata = _align_qc_metadata(transformed.index, metadata)
+    pca = centered_unscaled_pca(transformed.to_numpy(dtype=float), n_components=2)
+    pca_df = pd.DataFrame(pca.coordinates, index=metadata.index, columns=['PC1', 'PC2'])
     pca_df = pd.concat([pca_df, metadata], axis=1)
     pca_df.to_csv(os.path.join(out_dir, f'{prefix}_Coordinates.tsv'), sep='\t')
     pd.DataFrame({
         'component': ['PC1', 'PC2'],
-        'explained_variance_ratio': pca.explained_variance_ratio_,
+        'explained_variance_ratio': pca.explained_variance_ratio,
     }).to_csv(os.path.join(out_dir, f'{prefix}_Explained_Variance.tsv'), sep='\t', index=False)
 
     plt.figure(figsize=(8, 6))
@@ -230,12 +501,13 @@ def _save_pca_outputs(transformed, metadata, design_col, out_dir, prefix, title_
             plt.text(row['PC1'], row['PC2'], str(sample_id), fontsize=8)
     plt.title(
         f"{title_prefix}: "
-        f"PC1 {pca.explained_variance_ratio_[0]:.1%}, "
-        f"PC2 {pca.explained_variance_ratio_[1]:.1%}"
+        f"PC1 {pca.explained_variance_ratio[0]:.1%}, "
+        f"PC2 {pca.explained_variance_ratio[1]:.1%}"
     )
     plt.tight_layout()
     plt.savefig(os.path.join(out_dir, f'{prefix}_Plot.png'), dpi=300)
     plt.close()
+    return pca_df, pca
 
 def fit_model(counts_T, metadata, design, continuous_factors=None, n_cpus=4):
     print("  Fitting DESeq2 model...")

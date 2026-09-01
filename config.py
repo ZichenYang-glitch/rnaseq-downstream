@@ -42,6 +42,8 @@ DEFAULTS = {
     'GSEA_SUMMARY_FDR': 0.25,
     'GSEA_SUMMARY_TOP_TERMS': 20,
     'QC_TRANSFORM': 'vst',
+    'QC_PCA_TOP_N': 500,
+    'QC_BIOLOGY_FACTORS': None,
     'QC_ADJUST_FACTORS': [],
     'QC_ANNOTATION_FACTORS': [],
     'VST_USE_DESIGN': False,
@@ -52,8 +54,6 @@ DEFAULTS = {
     'GSEA_RANK_METRIC': 'stat',
     'SHRINK_LFC': True,
     'SHRINK_LFC_ADAPT': True,
-    'RUN_MOTIF': False,
-    'HOMER_SPECIES': 'mouse',
     'N_CPUS': 4,
 }
 
@@ -83,5 +83,7 @@ _reference_levels = dict(_CONFIG.get('REFERENCE_LEVELS', {}))
 if _CONFIG.get('DESIGN_FACTOR') and _CONFIG.get('REFERENCE_LEVEL') is not None:
     _reference_levels.setdefault(_CONFIG['DESIGN_FACTOR'], _CONFIG['REFERENCE_LEVEL'])
 _CONFIG['REFERENCE_LEVELS'] = _reference_levels
+if not _CONFIG.get('QC_BIOLOGY_FACTORS'):
+    _CONFIG['QC_BIOLOGY_FACTORS'] = [_CONFIG['DESIGN_FACTOR']]
 
 globals().update(_CONFIG)

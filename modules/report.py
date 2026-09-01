@@ -18,19 +18,22 @@ def create_master_table(
     out_dir,
     strip_gene_version=True,
     annotation_df=None,
+    count_annotation_df=None,
 ):
     os.makedirs(out_dir, exist_ok=True)
     
     # 1. Base Expression (TPM or Counts)
     if os.path.exists(tpm_file):
-        base = data.load_expression_matrix(
+        base, expression_annotation_df = data.load_expression_matrix(
             tpm_file,
             metadata.index,
             strip_gene_version=strip_gene_version,
             aggregate='mean',
+            return_gene_annotations=True,
         )
     else:
         base = counts_T.T.copy()
+        expression_annotation_df = None
         
     # Calculate group means
     groups = metadata[design_col].unique()
@@ -43,8 +46,13 @@ def create_master_table(
     # 2. Add Stats
     final = base.copy()
     final.index.name = 'gene_id'
-    if annotation_df is not None:
-        final = final.join(annotation_df, how='left')
+    display_annotations = data.merge_gene_name_annotations(
+        annotation_df,
+        expression_annotation_df,
+        count_annotation_df,
+    )
+    if display_annotations is not None:
+        final = final.join(display_annotations, how='left')
     for name, df in results_dict.items():
         stat_cols = [col for col in [
             'log2FoldChange',

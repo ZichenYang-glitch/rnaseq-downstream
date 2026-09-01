@@ -1,3 +1,5 @@
+# Experimental legacy input only. Fractional Salmon estimates now hard-fail;
+# the P0 input gate rejects bare merged Salmon matrices entirely.
 COUNTS_FILE: salmon.merged.gene_counts.tsv
 TPM_FILE: salmon.merged.gene_tpm.tsv
 METADATA_FILE: metadata.txt
@@ -38,6 +40,9 @@ TOP_LABEL_GENES: 10
 GSEA_SUMMARY_FDR: 0.25
 GSEA_SUMMARY_TOP_TERMS: 20
 QC_TRANSFORM: vst
+QC_PCA_TOP_N: 500
+# null protects DESIGN_FACTOR; provide a list to protect additional additive factors.
+QC_BIOLOGY_FACTORS: null
 QC_ADJUST_FACTORS: []
 QC_ANNOTATION_FACTORS: []
 VST_USE_DESIGN: false
@@ -52,6 +57,3 @@ GSEA_PERMUTATIONS: 1000
 GSEA_RANK_METRIC: stat
 SHRINK_LFC: true
 SHRINK_LFC_ADAPT: true
-
-RUN_MOTIF: false
-HOMER_SPECIES: mouse

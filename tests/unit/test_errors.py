@@ -8,15 +8,25 @@ import pytest
 
 from rnaseq_downstream.errors import (
     BackendFailedError,
+    AssayProtocolRequiredError,
+    CountValuesInvalidError,
     ContrastNotEstimableError,
+    CovariateConfoundedError,
     DesignRankDeficientError,
     ErrorCode,
     ExitCode,
     FeatureNotImplementedError,
+    GeneIdentifierError,
+    InputEvidenceRequiredError,
+    InputIntegrityError,
     InputReadError,
+    InputValidationError,
     InternalToolkitError,
     InvalidRequestError,
+    OutputWriteError,
     PartialRunError,
+    QCValidationError,
+    SampleSetMismatchError,
     SalmonOffsetRequiredError,
     ToolkitError,
 )
@@ -24,10 +34,7 @@ from rnaseq_downstream.errors import (
 
 @pytest.mark.unit
 def test_exit_code_values_are_stable() -> None:
-    assert {
-        member.name: int(member)
-        for member in ExitCode
-    } == {
+    assert {member.name: int(member) for member in ExitCode} == {
         "SUCCESS": 0,
         "REQUEST_ERROR": 2,
         "SCIENTIFIC_VALIDATION_ERROR": 3,
@@ -41,7 +48,60 @@ def test_exit_code_values_are_stable() -> None:
 @pytest.mark.parametrize(
     ("error_type", "code", "exit_code", "status"),
     [
-        (InvalidRequestError, ErrorCode.INVALID_REQUEST, ExitCode.REQUEST_ERROR, "error"),
+        (
+            InvalidRequestError,
+            ErrorCode.INVALID_REQUEST,
+            ExitCode.REQUEST_ERROR,
+            "error",
+        ),
+        (
+            InputValidationError,
+            ErrorCode.INPUT_VALIDATION_FAILED,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            InputEvidenceRequiredError,
+            ErrorCode.INPUT_EVIDENCE_REQUIRED,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            InputIntegrityError,
+            ErrorCode.INPUT_INTEGRITY_FAILED,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            CountValuesInvalidError,
+            ErrorCode.COUNT_VALUES_INVALID,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            SampleSetMismatchError,
+            ErrorCode.SAMPLE_SET_MISMATCH,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            GeneIdentifierError,
+            ErrorCode.GENE_ID_INVALID,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            AssayProtocolRequiredError,
+            ErrorCode.ASSAY_PROTOCOL_REQUIRED,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            QCValidationError,
+            ErrorCode.QC_VALIDATION_FAILED,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
         (
             SalmonOffsetRequiredError,
             ErrorCode.SALMON_OFFSET_REQUIRED,
@@ -51,6 +111,12 @@ def test_exit_code_values_are_stable() -> None:
         (
             DesignRankDeficientError,
             ErrorCode.DESIGN_RANK_DEFICIENT,
+            ExitCode.SCIENTIFIC_VALIDATION_ERROR,
+            "error",
+        ),
+        (
+            CovariateConfoundedError,
+            ErrorCode.COVARIATE_CONFOUNDED,
             ExitCode.SCIENTIFIC_VALIDATION_ERROR,
             "error",
         ),
@@ -116,6 +182,27 @@ def test_input_read_error_preserves_source_without_leaking_exception_objects() -
         "design_column": "condition",
     }
     assert error.to_dict()["details"] == error.details
+
+
+@pytest.mark.unit
+def test_output_write_error_preserves_stable_request_failure_context() -> None:
+    cause = OSError("read-only filesystem")
+    error = OutputWriteError(
+        "Could not publish validation evidence.",
+        path=Path("evidence"),
+        operation="publish_validation_bundle",
+        cause=cause,
+    )
+
+    assert error.code is ErrorCode.OUTPUT_WRITE_FAILED
+    assert error.exit_code is ExitCode.REQUEST_ERROR
+    assert error.cause is cause
+    assert error.details == {
+        "path": "evidence",
+        "operation": "publish_validation_bundle",
+        "cause_type": "OSError",
+        "cause_message": "read-only filesystem",
+    }
 
 
 @pytest.mark.unit

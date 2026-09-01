@@ -54,6 +54,8 @@ QC_OUTPUTS = [
     f"{OUTPUT_DIR}/01_QC/Sample_Distance.tsv",
     f"{OUTPUT_DIR}/01_QC/Sample_QC_Metrics.tsv",
     f"{OUTPUT_DIR}/01_QC/QC_Metadata_Associations.tsv",
+    f"{OUTPUT_DIR}/01_QC/QC_PCA_Method.json",
+    f"{OUTPUT_DIR}/01_QC/QC_PCA_Selected_Genes.tsv",
 ]
 DESEQ_OUTPUTS = [f"{OUTPUT_DIR}/02_DESeq2_Stats/{name}.csv" for name in CONTRAST_NAMES]
 DESEQ_SUMMARY = f"{OUTPUT_DIR}/02_DESeq2_Stats/_contrast_summary.csv"
@@ -92,16 +94,6 @@ REPORT_EXTRA_OUTPUTS = [
     f"{OUTPUT_DIR}/05_Summary/Report_Index.html",
 ]
 REPORT_CONTRAST_PAGES = [f"{OUTPUT_DIR}/05_Summary/contrast_{name}.html" for name in CONTRAST_NAMES]
-MOTIF_OUTPUTS = [
-    directory(f"{OUTPUT_DIR}/06_Motif/{name}")
-    for name in CONTRAST_NAMES
-] if config.get("RUN_MOTIF", False) else []
-MOTIF_TARGETS = [
-    f"{OUTPUT_DIR}/06_Motif/{name}"
-    for name in CONTRAST_NAMES
-] if config.get("RUN_MOTIF", False) else []
-
-
 rule all:
     input:
         VALIDATION_OUTPUTS,
@@ -116,7 +108,6 @@ rule all:
         REPORT_EXTRA_OUTPUTS,
         REPORT_CONTRAST_PAGES,
         GSEA_TARGETS,
-        MOTIF_TARGETS,
 
 
 rule validate:
@@ -196,15 +187,3 @@ rule report:
         "../../environment.yaml"
     shell:
         "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_report.py"
-
-
-rule motif:
-    input:
-        DESEQ_OUTPUTS,
-        CONFIG_INPUTS
-    output:
-        MOTIF_OUTPUTS
-    conda:
-        "../../environment.yaml"
-    shell:
-        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_motif.py"
