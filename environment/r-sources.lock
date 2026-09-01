@@ -1,0 +1,8 @@
+package	version	repository	role	url	sha256
+renv	1.2.4	CRAN	bootstrap	https://cran.r-project.org/src/contrib/renv_1.2.4.tar.gz	e63c637dc785d55848d9dbc6c9599378103803efd47c1f3f1f82057c00575e8c
+BiocManager	1.30.27	CRAN	bootstrap	https://cran.r-project.org/src/contrib/BiocManager_1.30.27.tar.gz	acbfdcf09602c8279085556ca54531c2ada0ac3c1775d54ce2c3b9a3dc03fbb5
+edgeR	4.10.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/Archive/edgeR/edgeR_4.10.0.tar.gz	b02f02639e08ba978ecc0420a770121922f683ff3ebd0645df44c1e67b42a061
+limma	3.68.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/Archive/limma/limma_3.68.0.tar.gz	e58fc11741b3c1a3aa311f26101ef6a67404ce92fd4d1cecc89b27aa6f70e095
+tximport	1.40.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/tximport_1.40.0.tar.gz	72841a6b2ac1f64ccb05af2d9fba4eea781596771798cefcb3a9327f9dc929f9
+compcodeR	1.48.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/compcodeR_1.48.0.tar.gz	9890c63d8f6cb585ef9311fa888d162ebe1148809c9082d8710f39a07a013b07
+airway	1.32.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/data/experiment/src/contrib/airway_1.32.0.tar.gz	829f654fc8075ac9d810574e8a8d4672e69e847c45fa2ce598d1ffbc30c7fe19
