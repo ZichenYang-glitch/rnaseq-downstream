@@ -9,7 +9,6 @@ from typing import Any, Mapping, Sequence, TextIO
 
 from .errors import ErrorCode
 
-
 SCHEMA_VERSION = "1.0"
 
 
@@ -79,7 +78,7 @@ def _serialize_with_fallback(envelope: Mapping[str, Any]) -> tuple[str, bool]:
         document = json.dumps(
             envelope,
             allow_nan=False,
-            ensure_ascii=False,
+            ensure_ascii=True,
             separators=(",", ":"),
         )
         return document, False
@@ -88,7 +87,7 @@ def _serialize_with_fallback(envelope: Mapping[str, Any]) -> tuple[str, bool]:
         document = json.dumps(
             fallback,
             allow_nan=False,
-            ensure_ascii=False,
+            ensure_ascii=True,
             separators=(",", ":"),
         )
         return document, True

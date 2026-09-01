@@ -20,8 +20,8 @@ def pytest_configure(config: pytest.Config) -> None:
     """Register the evidence-lane markers without relying on local plugins."""
 
     markers = {
-        "unit": "pure Python contract and error-model tests",
-        "integration": "cross-process and installed-CLI integration tests",
+        "unit": "contract, input-semantics, data-integrity, and QC-math tests",
+        "integration": "cross-process CLI and evidence-publication tests",
         "oracle": "locked same-engine airway oracle parity tests",
         "simulation": "locked compcodeR FDR/TPR simulation gates",
     }

@@ -17,7 +17,6 @@ from rnaseq_downstream.contracts import (
 )
 from rnaseq_downstream.errors import PartialRunError
 
-
 EXPECTED_KEYS = [
     "schema_version",
     "command",
@@ -102,7 +101,8 @@ def test_serializer_is_compact_valid_json() -> None:
     document = serialize_envelope(envelope)
 
     assert json.loads(document) == envelope
-    assert "基因" in document
+    assert document.isascii()
+    assert "\\u57fa\\u56e0" in document
     assert "\n" not in document
     assert ": " not in document
 

@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import math
+from types import SimpleNamespace
 
 import pytest
 
 from rnaseq_downstream import cli
+from rnaseq_downstream import validation_bundle
 from rnaseq_downstream.contracts import Status, build_envelope
 from rnaseq_downstream.errors import (
     BackendFailedError,
@@ -57,9 +59,20 @@ def test_execute_maps_typed_failures_to_public_contract(
     def fail_reserved_command(_arguments) -> dict:
         raise failure
 
-    monkeypatch.setattr(cli, "_reserved_command", fail_reserved_command)
+    if command == "validate":
+        monkeypatch.setattr(cli, "_validate", fail_reserved_command)
+        arguments = [
+            command,
+            "--request",
+            "request.json",
+            "--output-dir",
+            "evidence",
+        ]
+    else:
+        monkeypatch.setattr(cli, "_reserved_command", fail_reserved_command)
+        arguments = [command]
 
-    envelope, exit_code = cli._execute([command])
+    envelope, exit_code = cli._execute(arguments)
 
     assert exit_code is expected_exit
     assert envelope["command"] == command
@@ -117,3 +130,42 @@ def test_main_returns_internal_exit_when_serialization_falls_back(
     assert document["errors"][0]["code"] == "INTERNAL_ERROR"
     assert captured.out.count("\n") == 1
     assert captured.err == ""
+
+
+@pytest.mark.unit
+def test_validate_scope_preserves_ineligible_input_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validation_result = {
+        "data": {
+            "input_certification_status": "ineligible",
+            "input_certification_eligible": False,
+        },
+        "warnings": [{"code": "HIGH_RISK_OVERRIDE", "severity": "high"}],
+        "artifacts": [],
+    }
+    monkeypatch.setattr(
+        validation_bundle,
+        "validate_request_to_bundle",
+        lambda _request, _output: {
+            "validation_result": validation_result,
+            "bundle": {
+                "artifacts": [],
+                "validation": {},
+                "warnings": [
+                    {"code": "OUTPUT_DURABILITY_UNCONFIRMED", "severity": "high"}
+                ],
+            },
+        },
+    )
+
+    result = cli._validate(
+        SimpleNamespace(request="request.json", output_dir="evidence")
+    )
+
+    assert result.data["scope"]["input_semantics"] == "ineligible"
+    assert result.data["scope"]["full_numeric_validation"] == "passed"
+    assert [warning["code"] for warning in result.warnings] == [
+        "HIGH_RISK_OVERRIDE",
+        "OUTPUT_DURABILITY_UNCONFIRMED",
+    ]

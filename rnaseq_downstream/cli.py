@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import logging
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from . import __version__
@@ -19,9 +20,17 @@ from .errors import (
     ToolkitError,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 COMMANDS = ("capabilities", "inspect", "validate", "run", "summarize")
+
+
+@dataclass(frozen=True)
+class _CommandResult:
+    """Handler result before it is wrapped in the public response envelope."""
+
+    data: Any
+    warnings: tuple[Mapping[str, Any], ...] = ()
+    artifacts: tuple[Mapping[str, Any], ...] = ()
 
 
 class _HelpRequested(Exception):
@@ -83,9 +92,24 @@ def _build_parser() -> _JsonArgumentParser:
     capabilities.command_name = "capabilities"
     capabilities.set_defaults(handler=_capabilities)
 
+    inspect = subparsers.add_parser(
+        "inspect",
+        help="Inspect declared inputs and provenance without writing artifacts.",
+    )
+    inspect.command_name = "inspect"
+    inspect.add_argument("--request", required=True, metavar="REQUEST.json")
+    inspect.set_defaults(handler=_inspect)
+
+    validate = subparsers.add_parser(
+        "validate",
+        help="Validate input semantics and atomically archive input evidence.",
+    )
+    validate.command_name = "validate"
+    validate.add_argument("--request", required=True, metavar="REQUEST.json")
+    validate.add_argument("--output-dir", required=True, metavar="DIRECTORY")
+    validate.set_defaults(handler=_validate)
+
     reserved_help = {
-        "inspect": "Inspect declared inputs and provenance.",
-        "validate": "Validate input semantics and statistical design.",
         "run": "Execute the planned evidence-gated analysis path.",
         "summarize": "Summarize a completed run from machine-readable artifacts.",
     }
@@ -121,13 +145,73 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
         },
         "commands": {
             "capabilities": "implemented",
-            "inspect": "reserved_not_implemented",
-            "validate": "reserved_not_implemented",
+            "inspect": "implemented_input_semantics_read_only",
+            "validate": "implemented_input_semantics_only",
             "run": "reserved_not_implemented",
             "summarize": "reserved_not_implemented",
         },
+        "validated_input_semantics": [
+            "featurecounts_integer",
+            "salmon_quant_dirs_full_length",
+            "salmon_quant_dirs_three_prime",
+        ],
         "certified_analysis_paths": [],
     }
+
+
+def _input_only_scope(
+    *,
+    input_semantics: str,
+    full_numeric_validation: str,
+) -> dict[str, Any]:
+    return {
+        "validation_scope": "input_semantics_only",
+        "input_semantics": input_semantics,
+        "full_numeric_validation": full_numeric_validation,
+        "design": "not_run",
+        "backend": "not_run",
+        "runnable": False,
+        "analysis_path_certified": False,
+    }
+
+
+def _inspect(arguments: argparse.Namespace) -> _CommandResult:
+    from .input_semantics import inspect_request
+
+    result = inspect_request(arguments.request)
+    data = {
+        "scope": _input_only_scope(
+            input_semantics="inspected",
+            full_numeric_validation="not_run",
+        ),
+        "input": result["data"],
+    }
+    return _CommandResult(
+        data=data,
+        warnings=tuple(result["warnings"]),
+        artifacts=tuple(result["artifacts"]),
+    )
+
+
+def _validate(arguments: argparse.Namespace) -> _CommandResult:
+    from .validation_bundle import validate_request_to_bundle
+
+    completed = validate_request_to_bundle(arguments.request, arguments.output_dir)
+    result = completed["validation_result"]
+    bundle = completed["bundle"]
+    data = {
+        "scope": _input_only_scope(
+            input_semantics=result["data"]["input_certification_status"],
+            full_numeric_validation="passed",
+        ),
+        "input": result["data"],
+        "bundle": bundle,
+    }
+    return _CommandResult(
+        data=data,
+        warnings=tuple([*result["warnings"], *bundle["warnings"]]),
+        artifacts=tuple([*result["artifacts"], *bundle["artifacts"]]),
+    )
 
 
 def _reserved_command(arguments: argparse.Namespace) -> dict[str, Any]:
@@ -135,7 +219,7 @@ def _reserved_command(arguments: argparse.Namespace) -> dict[str, Any]:
         f"The '{arguments.command}' command is reserved but not implemented in this checkpoint.",
         details={
             "command": arguments.command,
-            "checkpoint": "P0_foundation_work_items_1_2",
+            "checkpoint": "P0_checkpoint_A_work_items_3_4",
         },
     )
 
@@ -147,8 +231,19 @@ def _infer_command(arguments: Sequence[str]) -> str:
     return "cli"
 
 
-def _success_envelope(command: str, data: Any) -> dict[str, Any]:
-    return build_envelope(command, status=Status.SUCCESS, data=data)
+def _success_envelope(
+    command: str,
+    result: _CommandResult | Any,
+) -> dict[str, Any]:
+    if isinstance(result, _CommandResult):
+        return build_envelope(
+            command,
+            status=Status.SUCCESS,
+            data=result.data,
+            warnings=result.warnings,
+            artifacts=result.artifacts,
+        )
+    return build_envelope(command, status=Status.SUCCESS, data=result)
 
 
 def _error_envelope(command: str, error: ToolkitError) -> dict[str, Any]:
@@ -163,9 +258,9 @@ def _execute(arguments: Sequence[str]) -> tuple[dict[str, Any], ExitCode]:
     command = _infer_command(arguments)
     try:
         parsed = _build_parser().parse_args(list(arguments))
-        handler: Callable[[argparse.Namespace], dict[str, Any]] = parsed.handler
-        data = handler(parsed)
-        return _success_envelope(parsed.command, data), ExitCode.SUCCESS
+        handler: Callable[[argparse.Namespace], _CommandResult | Any] = parsed.handler
+        result = handler(parsed)
+        return _success_envelope(parsed.command, result), ExitCode.SUCCESS
     except _HelpRequested as help_request:
         return (
             _success_envelope(help_request.command, {"help": help_request.text}),
