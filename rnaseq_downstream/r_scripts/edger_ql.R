@@ -412,6 +412,353 @@ assert_gene_ids <- function(gene_ids) {
     }
 }
 
+strict_boolean_scalar <- function(value, field) {
+    if (!is.logical(value) || length(value) != 1L || is.na(value)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            paste0("The normalized field '", field, "' must be boolean."),
+            list(reason = "normalized_request_invalid", field = field)
+        )
+    }
+    value
+}
+
+strict_nonnegative_integer_scalar <- function(value, field) {
+    if (!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+        value < 0 || value != floor(value)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            paste0(
+                "The normalized field '", field,
+                "' must be a nonnegative integer."
+            ),
+            list(reason = "normalized_request_invalid", field = field)
+        )
+    }
+    as.numeric(value)
+}
+
+strict_character_scalar <- function(value, field) {
+    if (!is.character(value) || length(value) != 1L || is.na(value) ||
+        !nzchar(value)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            paste0(
+                "The normalized field '", field,
+                "' must be a non-empty string."
+            ),
+            list(reason = "normalized_request_invalid", field = field)
+        )
+    }
+    value
+}
+
+validate_inferential_replicate_summary <- function(input, samples) {
+    summary <- input$salmon$inferential_replicates
+    if (!is.list(summary)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized inferential-replicate summary is incomplete.",
+            list(reason = "normalized_replicate_summary_invalid")
+        )
+    }
+    records <- summary$per_sample
+    if (!is.list(records) || length(records) != length(samples) ||
+        any(!vapply(records, is.list, logical(1L)))) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized inferential-replicate summary is incomplete.",
+            list(reason = "normalized_replicate_summary_invalid")
+        )
+    }
+    record_samples <- vapply(
+        seq_along(records),
+        function(index) strict_character_scalar(
+            records[[index]]$sample_id,
+            paste0("input.salmon.inferential_replicates.per_sample[", index,
+                   "].sample_id")
+        ),
+        character(1L)
+    )
+    if (!identical(record_samples, samples)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The inferential-replicate summary is not aligned to sample order.",
+            list(
+                reason = "normalized_replicate_sample_order_mismatch",
+                expected = samples,
+                observed = record_samples
+            )
+        )
+    }
+    present <- vapply(
+        seq_along(records),
+        function(index) strict_boolean_scalar(
+            records[[index]]$present,
+            paste0("input.salmon.inferential_replicates.per_sample[", index,
+                   "].present")
+        ),
+        logical(1L)
+    )
+    counts <- vapply(
+        seq_along(records),
+        function(index) strict_nonnegative_integer_scalar(
+            records[[index]]$count,
+            paste0("input.salmon.inferential_replicates.per_sample[", index,
+                   "].count")
+        ),
+        numeric(1L)
+    )
+    methods <- vapply(
+        seq_along(records),
+        function(index) {
+            method <- records[[index]]$method
+            if (is.null(method)) return(NA_character_)
+            strict_character_scalar(
+                method,
+                paste0("input.salmon.inferential_replicates.per_sample[", index,
+                       "].method")
+            )
+        },
+        character(1L)
+    )
+    state <- strict_character_scalar(
+        summary$state, "input.salmon.inferential_replicates.state"
+    )
+    consistent <- strict_boolean_scalar(
+        summary$consistent_method_and_count,
+        "input.salmon.inferential_replicates.consistent_method_and_count"
+    )
+    expected_state <- if (all(present)) {
+        "all"
+    } else if (any(present)) {
+        "mixed"
+    } else {
+        "none"
+    }
+    if (!identical(state, expected_state) || !consistent || state == "mixed") {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized inferential-replicate summary is inconsistent.",
+            list(
+                reason = "normalized_replicate_summary_inconsistent",
+                declared_state = state,
+                observed_state = expected_state,
+                declared_consistent = consistent
+            )
+        )
+    }
+
+    if (state == "none") {
+        if (any(counts != 0L) || any(!is.na(methods)) ||
+            !is.null(summary$replicate_count) || !is.null(summary$method)) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "A no-replicate summary contains positive replicate evidence.",
+                list(reason = "normalized_replicate_summary_inconsistent")
+            )
+        }
+        count <- 0L
+        method <- NULL
+    } else {
+        if (any(counts < 1L) || length(unique(counts)) != 1L ||
+            any(is.na(methods)) || length(unique(methods)) != 1L) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "Replicate method and count must agree across every sample.",
+                list(reason = "normalized_replicate_summary_inconsistent")
+            )
+        }
+        count <- counts[[1L]]
+        method <- methods[[1L]]
+        declared_count <- strict_nonnegative_integer_scalar(
+            summary$replicate_count,
+            "input.salmon.inferential_replicates.replicate_count"
+        )
+        declared_method <- strict_character_scalar(
+            summary$method, "input.salmon.inferential_replicates.method"
+        )
+        if (declared_count != count || !identical(declared_method, method)) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "The aggregate and per-sample replicate summaries disagree.",
+                list(reason = "normalized_replicate_summary_inconsistent")
+            )
+        }
+    }
+
+    if (identical(input$input_semantics, "salmon_quant_dirs_full_length") &&
+        state == "all" && count < 2L) {
+        backend_abort(
+            "BACKEND_FAILED",
+            paste(
+                "Full-length Salmon inferential overdispersion requires at",
+                "least two replicates per sample."
+            ),
+            list(
+                reason = "inferential_replicate_count_below_minimum",
+                observed_replicates_per_sample = count,
+                minimum_replicates_per_sample = 2L
+            )
+        )
+    }
+    list(state = state, count = count, method = method, present = present)
+}
+
+validate_salmon_route <- function(input, samples) {
+    replicate_info <- validate_inferential_replicate_summary(input, samples)
+    route <- input$route
+    if (!is.list(route)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized Salmon route is invalid.",
+            list(reason = "normalized_route_invalid")
+        )
+    }
+    tximport_options <- route$tximport
+    if (!is.list(tximport_options) ||
+        !identical(tximport_options$countsFromAbundance, "no") ||
+        strict_boolean_scalar(
+            tximport_options$dropInfReps, "input.route.tximport.dropInfReps"
+        )) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized Salmon tximport route is invalid.",
+            list(reason = "normalized_route_invalid")
+        )
+    }
+
+    semantics <- input$input_semantics
+    if (identical(semantics, "salmon_quant_dirs_full_length")) {
+        expected_divide <- identical(replicate_info$state, "all")
+        edgeR_options <- route$edgeR_options
+        overdispersion <- route$inferential_overdispersion
+        if (!is.list(edgeR_options) || !is.list(overdispersion)) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "The normalized full-length Salmon route is incomplete.",
+                list(reason = "normalized_route_invalid")
+            )
+        }
+        divide <- strict_boolean_scalar(
+            edgeR_options$divide, "input.route.edgeR_options.divide"
+        )
+        enabled <- strict_boolean_scalar(
+            overdispersion$enabled,
+            "input.route.inferential_overdispersion.enabled"
+        )
+        relative_adjustment <- strict_boolean_scalar(
+            overdispersion$relative_abundance_adjustment,
+            paste0(
+                "input.route.inferential_overdispersion.",
+                "relative_abundance_adjustment"
+            )
+        )
+        if (!identical(route$edgeR_constructor, "edgeR::DGEListFromTximport") ||
+            !identical(route$count_source, "txi$counts") ||
+            !identical(route$transcript_length_offset, TRUE) ||
+            !identical(overdispersion$source, "tximport.infReps") ||
+            !identical(divide, expected_divide) ||
+            !identical(enabled, divide) ||
+            !identical(relative_adjustment, divide)) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "The full-length Salmon route contradicts its input evidence.",
+                list(
+                    reason = "normalized_route_replicate_mismatch",
+                    expected_divide = expected_divide,
+                    observed_divide = divide
+                )
+            )
+        }
+        return(list(divide = divide, replicates = replicate_info))
+    }
+
+    if (identical(semantics, "salmon_quant_dirs_three_prime")) {
+        if (!identical(route$edgeR_constructor, "edgeR::DGEList") ||
+            !identical(route$count_source, "txi$counts") ||
+            !identical(route$transcript_length_offset, FALSE) ||
+            !identical(route$gene_length_correction, FALSE) ||
+            !identical(route$certified_path_execution_permitted, TRUE) ||
+            !is.null(route$edgeR_options) ||
+            !is.null(route$inferential_overdispersion)) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "The three-prime Salmon route contradicts its declared semantics.",
+                list(reason = "normalized_route_invalid")
+            )
+        }
+        return(list(divide = FALSE, replicates = replicate_info))
+    }
+
+    backend_abort(
+        "BACKEND_FAILED",
+        "The normalized Salmon route is unsupported.",
+        list(reason = "normalized_route_invalid", input_semantics = semantics)
+    )
+}
+
+validate_imported_replicates <- function(txi, route_info, samples) {
+    replicate_info <- route_info$replicates
+    if (identical(replicate_info$state, "none")) {
+        if (!is.null(txi$infReps)) {
+            backend_abort(
+                "BACKEND_FAILED",
+                "tximport imported replicates absent from validated evidence.",
+                list(reason = "imported_replicates_evidence_mismatch")
+            )
+        }
+        return(FALSE)
+    }
+    if (!is.list(txi$infReps) || length(txi$infReps) != length(samples)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "tximport did not import one replicate matrix per sample.",
+            list(reason = "inferential_replicates_missing_after_tximport")
+        )
+    }
+    if (!is.null(names(txi$infReps)) &&
+        !identical(names(txi$infReps), samples)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "tximport inferential replicates are out of sample order.",
+            list(reason = "imported_replicate_sample_order_mismatch")
+        )
+    }
+    imported_counts <- vapply(
+        txi$infReps,
+        function(replicates) {
+            if (length(dim(replicates)) != 2L) return(NA_integer_)
+            ncol(replicates)
+        },
+        integer(1L)
+    )
+    if (anyNA(imported_counts) ||
+        any(imported_counts != replicate_info$count)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "Imported replicate dimensions differ from validated evidence.",
+            list(
+                reason = "imported_replicate_count_mismatch",
+                expected_replicates_per_sample = replicate_info$count,
+                observed_replicates_per_sample = imported_counts
+            )
+        )
+    }
+    if (isTRUE(route_info$divide) && any(imported_counts < 2L)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The divided-count route requires at least two replicates per sample.",
+            list(
+                reason = "inferential_replicate_count_below_minimum",
+                observed_replicates_per_sample = imported_counts,
+                minimum_replicates_per_sample = 2L
+            )
+        )
+    }
+    TRUE
+}
+
 read_combined_featurecounts <- function(input) {
     info <- input$featurecounts
     table <- utils::read.delim(
@@ -550,6 +897,7 @@ read_benchmark_counts <- function(input) {
 
 read_salmon <- function(input) {
     samples <- as_character_vector(input$sample_order, "input.sample_order")
+    route_info <- validate_salmon_route(input, samples)
     records <- input$salmon$samples
     quant_dirs <- vapply(records, function(record) record$quant_dir, character(1L))
     record_samples <- vapply(records, function(record) record$sample_id, character(1L))
@@ -589,17 +937,46 @@ read_salmon <- function(input) {
         countsFromAbundance = "no",
         dropInfReps = FALSE
     )
+    if (!identical(txi$countsFromAbundance, "no")) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "tximport did not preserve countsFromAbundance='no'.",
+            list(reason = "tximport_count_semantics_mismatch")
+        )
+    }
+    inferential_replicates_imported <- validate_imported_replicates(
+        txi, route_info, samples
+    )
     semantics <- input$input_semantics
     if (identical(semantics, "salmon_quant_dirs_full_length")) {
-        divide <- isTRUE(input$route$edgeR_options$divide)
-        if (divide && (is.null(txi$infReps) || length(txi$infReps) != length(samples))) {
+        divide <- route_info$divide
+        y <- edgeR::DGEListFromTximport(txi, divide = divide)
+        if (!identical(isTRUE(y$divided.counts), divide)) {
             backend_abort(
                 "BACKEND_FAILED",
-                "The full-length route requires inferential replicates for divide=TRUE.",
-                list(reason = "inferential_replicates_missing_after_tximport")
+                "DGEListFromTximport did not honor the validated divide setting.",
+                list(
+                    reason = "dgelist_divide_mismatch",
+                    requested = divide,
+                    observed = isTRUE(y$divided.counts)
+                )
             )
         }
-        y <- edgeR::DGEListFromTximport(txi, divide = divide)
+        if (divide) {
+            overdispersion <- y$genes$Overdispersion
+            if (is.null(overdispersion) ||
+                length(overdispersion) != nrow(y$counts) ||
+                any(!is.finite(overdispersion)) || any(overdispersion <= 0)) {
+                backend_abort(
+                    "BACKEND_FAILED",
+                    paste(
+                        "DGEListFromTximport did not produce finite positive",
+                        "inferential overdispersion estimates."
+                    ),
+                    list(reason = "inferential_overdispersion_invalid")
+                )
+            }
+        }
         if (is.null(y$offset.prior)) {
             backend_abort(
                 "BACKEND_FAILED",
@@ -613,7 +990,7 @@ read_salmon <- function(input) {
             countsFromAbundance = "no",
             dropInfReps = FALSE,
             divide = divide,
-            inferential_replicates_imported = !is.null(txi$infReps)
+            inferential_replicates_imported = inferential_replicates_imported
         )
     } else if (identical(semantics, "salmon_quant_dirs_three_prime")) {
         gene_ids <- rownames(txi$counts)
@@ -637,7 +1014,7 @@ read_salmon <- function(input) {
             countsFromAbundance = "no",
             dropInfReps = FALSE,
             divide = FALSE,
-            inferential_replicates_imported = !is.null(txi$infReps)
+            inferential_replicates_imported = inferential_replicates_imported
         )
     } else {
         backend_abort(
@@ -712,6 +1089,14 @@ long_design_table <- function(design) {
 }
 
 long_coefficient_table <- function(gene_ids, keep, fit, design_columns) {
+    expected_gene_ids <- gene_ids[keep]
+    if (!identical(rownames(fit$coefficients), expected_gene_ids)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "edgeR fitted coefficients are not aligned to filtered gene IDs.",
+            list(reason = "fit_gene_order_mismatch")
+        )
+    }
     fitted <- matrix(
         NA_real_,
         nrow = length(gene_ids),
@@ -756,6 +1141,17 @@ contrast_results <- function(gene_ids, keep, fit, contrast) {
         edgeR::glmQLFTest(fit, contrast = contrast$vector)
     }
     table <- test$table
+    expected_gene_ids <- gene_ids[keep]
+    if (!identical(rownames(table), expected_gene_ids)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The edgeR test table is not aligned to filtered gene IDs.",
+            list(
+                reason = "test_gene_order_mismatch",
+                contrast_id = contrast$contrast_id
+            )
+        )
+    }
     is_treat <- identical(contrast$test_method, "glmTreat")
     if (!is_treat && !"F" %in% colnames(table)) {
         backend_abort(

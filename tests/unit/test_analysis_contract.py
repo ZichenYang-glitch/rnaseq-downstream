@@ -6,8 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from rnaseq_downstream.analysis_contract import load_analysis_request
-from rnaseq_downstream.edger_backend import _invoke_r, _raise_backend_response
+from rnaseq_downstream.analysis_contract import _parse_design, load_analysis_request
+from rnaseq_downstream.edger_backend import (
+    _capture_output_json,
+    _invoke_r,
+    _raise_backend_response,
+)
 from rnaseq_downstream.errors import (
     BackendFailedError,
     ContrastNotEstimableError,
@@ -30,6 +34,44 @@ def _write_json(path: Path, document: object) -> Path:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _rewrite_bundle(
+    bundle: Path,
+    documents: dict[str, dict[str, object]],
+    *,
+    plan_id: str,
+) -> None:
+    """Rewrite declared evidence and rebuild every manifest member digest."""
+
+    members: list[dict[str, object]] = []
+    for name in ("input_plan.json", "provenance.json", "validated_request.json"):
+        document = documents[name]
+        document["plan_id"] = plan_id
+        _write_json(bundle / name, document)
+        members.append(
+            {
+                "path": name,
+                "sha256": _sha256(bundle / name),
+                "size_bytes": (bundle / name).stat().st_size,
+            }
+        )
+    _write_json(
+        bundle / "bundle_manifest.json",
+        {
+            "schema_version": "1.0",
+            "kind": "validation_bundle_manifest",
+            "plan_id": plan_id,
+            "members": members,
+        },
+    )
+
+
+def _read_bundle_documents(bundle: Path) -> dict[str, dict[str, object]]:
+    return {
+        name: json.loads((bundle / name).read_text(encoding="utf-8"))
+        for name in ("input_plan.json", "provenance.json", "validated_request.json")
+    }
 
 
 def _validated_bundle(root: Path) -> Path:
@@ -149,6 +191,96 @@ def test_analysis_contract_rejects_tampered_or_extra_bundle_entries(
         load_analysis_request(request)
 
 
+def test_bundle_identity_is_recomputed_after_all_declared_ids_are_rebound(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    documents = _read_bundle_documents(bundle)
+    plan_input = documents["input_plan.json"]["input"]
+    assert isinstance(plan_input, dict)
+    route = plan_input["route"]
+    assert isinstance(route, dict)
+    route["transcript_length_offset"] = 0
+
+    replacement_id = "f" * 64
+    _rewrite_bundle(bundle, documents, plan_id=replacement_id)
+    request = _analysis_request(tmp_path, bundle, weights={"conditiontreated": 1})
+
+    with pytest.raises(InputIntegrityError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["reason"] == "plan_id_recomputed_mismatch"
+    assert caught.value.details["declared_plan_id"] == replacement_id
+    assert caught.value.details["recomputed_plan_id"] != replacement_id
+
+
+def test_bundle_input_comparison_does_not_treat_false_as_integer_zero(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    documents = _read_bundle_documents(bundle)
+    original_id = documents["validated_request.json"]["plan_id"]
+    assert isinstance(original_id, str)
+    plan_input = documents["input_plan.json"]["input"]
+    assert isinstance(plan_input, dict)
+    route = plan_input["route"]
+    assert isinstance(route, dict)
+    route["transcript_length_offset"] = 0
+    assert route["transcript_length_offset"] == bool(0)
+
+    _rewrite_bundle(bundle, documents, plan_id=original_id)
+    request = _analysis_request(tmp_path, bundle, weights={"conditiontreated": 1})
+
+    with pytest.raises(InputIntegrityError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["reason"] == "normalized_input_mismatch"
+
+
+def test_bundle_receipt_and_provenance_warnings_must_match_exactly(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    documents = _read_bundle_documents(bundle)
+    plan_id = documents["validated_request.json"]["plan_id"]
+    assert isinstance(plan_id, str)
+    documents["provenance.json"]["warnings"] = [
+        {
+            "code": "ADVERSARIAL_WARNING",
+            "severity": "high",
+            "message": "This warning was not present in the validated receipt.",
+            "details": {},
+        }
+    ]
+    _rewrite_bundle(bundle, documents, plan_id=plan_id)
+    request = _analysis_request(tmp_path, bundle, weights={"conditiontreated": 1})
+
+    with pytest.raises(InputIntegrityError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["reason"] == "validation_warnings_mismatch"
+
+
+@pytest.mark.parametrize(
+    "member_name",
+    ["input_plan.json", "provenance.json", "validated_request.json"],
+)
+def test_bundle_members_require_exact_top_level_schemas(
+    tmp_path: Path,
+    member_name: str,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    documents = _read_bundle_documents(bundle)
+    plan_id = documents["validated_request.json"]["plan_id"]
+    assert isinstance(plan_id, str)
+    documents[member_name]["unexpected"] = "not allowed"
+    _rewrite_bundle(bundle, documents, plan_id=plan_id)
+    request = _analysis_request(tmp_path, bundle, weights={"conditiontreated": 1})
+
+    with pytest.raises(InputIntegrityError, match="incompatible schema"):
+        load_analysis_request(request)
+
+
 def test_zero_contrast_is_a_scientific_estimability_error(tmp_path: Path) -> None:
     bundle = _validated_bundle(tmp_path)
     request = _analysis_request(tmp_path, bundle, weights={"conditiontreated": 0})
@@ -158,6 +290,79 @@ def test_zero_contrast_is_a_scientific_estimability_error(tmp_path: Path) -> Non
 
     assert caught.value.to_dict()["code"] == "CONTRAST_NOT_ESTIMABLE"
     assert caught.value.details["reason"] == "contrast_zero"
+
+
+@pytest.mark.parametrize(
+    "reserved_word",
+    [
+        "if",
+        "else",
+        "repeat",
+        "while",
+        "function",
+        "for",
+        "in",
+        "next",
+        "break",
+        "TRUE",
+        "FALSE",
+        "NULL",
+        "Inf",
+        "NaN",
+        "NA",
+        "NA_integer_",
+        "NA_real_",
+        "NA_complex_",
+        "NA_character_",
+    ],
+)
+def test_design_terms_reject_every_r_reserved_word(reserved_word: str) -> None:
+    with pytest.raises(InvalidRequestError) as caught:
+        _parse_design(
+            {
+                "intercept": True,
+                "terms": [reserved_word],
+                "variables": {reserved_word: {"type": "continuous"}},
+            }
+        )
+
+    assert caught.value.details == {
+        "term": reserved_word,
+        "reason": "r_reserved_word",
+    }
+
+
+@pytest.mark.parametrize(
+    ("filename", "role"),
+    [
+        ("backend_manifest.json", "backend_manifest"),
+        ("analysis.json", "edger_analysis"),
+    ],
+)
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"kind":',
+        b'{"kind":"first","kind":"duplicate"}\n',
+        b"[]\n",
+    ],
+    ids=["malformed", "duplicate_key", "wrong_root"],
+)
+def test_backend_output_json_parse_failures_are_backend_errors(
+    tmp_path: Path,
+    filename: str,
+    role: str,
+    payload: bytes,
+) -> None:
+    path = tmp_path / filename
+    path.write_bytes(payload)
+
+    with pytest.raises(BackendFailedError) as caught:
+        _capture_output_json(path, role=role)
+
+    assert caught.value.to_dict()["code"] == "BACKEND_FAILED"
+    assert caught.value.details["role"] == role
+    assert caught.value.details["parse_error_code"] == "INVALID_REQUEST"
 
 
 @pytest.mark.parametrize(

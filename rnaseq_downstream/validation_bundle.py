@@ -26,7 +26,7 @@ _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 
 
-def _canonical_bytes(document: Mapping[str, Any]) -> bytes:
+def _canonical_bytes(document: Any) -> bytes:
     try:
         serialized = json.dumps(
             document,
@@ -42,6 +42,38 @@ def _canonical_bytes(document: Mapping[str, Any]) -> bytes:
             details={"cause_type": type(error).__name__},
             cause=error,
         ) from error
+
+
+def compute_validation_plan_id(normalized: Mapping[str, Any]) -> str:
+    """Return the deterministic identity of normalized validation evidence.
+
+    ``normalized`` is the exact ``data``/``warnings``/``artifacts`` object
+    written into ``validated_request.json``.  Keeping this computation in one
+    place lets evidence consumers independently derive the identity instead of
+    trusting the digest repeated by bundle members.
+    """
+
+    expected_keys = {"data", "warnings", "artifacts"}
+    if not isinstance(normalized, Mapping) or set(normalized) != expected_keys:
+        raise InternalToolkitError(
+            "Normalized validation evidence has an incompatible identity schema.",
+            details={
+                "expected_keys": sorted(expected_keys),
+                "observed_keys": (
+                    sorted(str(key) for key in normalized)
+                    if isinstance(normalized, Mapping)
+                    else None
+                ),
+                "observed_type": type(normalized).__name__,
+            },
+        )
+    return hashlib.sha256(_canonical_bytes(normalized)).hexdigest()
+
+
+def canonical_json_equal(left: Any, right: Any) -> bool:
+    """Compare JSON values without Python's ``True == 1`` coercion semantics."""
+
+    return _canonical_bytes({"value": left}) == _canonical_bytes({"value": right})
 
 
 def _write_json(path: Path, document: Mapping[str, Any]) -> tuple[str, int]:
@@ -244,7 +276,7 @@ def _write_validation_bundle(
         "warnings": [dict(item) for item in warnings],
         "artifacts": [dict(item) for item in consumed_artifacts],
     }
-    plan_id = hashlib.sha256(_canonical_bytes(normalized)).hexdigest()
+    plan_id = compute_validation_plan_id(normalized)
     scope = {
         "input_semantics": input_data["input_certification_status"],
         "design": "not_run",
@@ -410,4 +442,9 @@ def validate_request_to_bundle(
     return {"validation_result": result, "bundle": bundle}
 
 
-__all__ = ["BUNDLE_SCHEMA_VERSION", "validate_request_to_bundle"]
+__all__ = [
+    "BUNDLE_SCHEMA_VERSION",
+    "canonical_json_equal",
+    "compute_validation_plan_id",
+    "validate_request_to_bundle",
+]

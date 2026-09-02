@@ -27,6 +27,7 @@ from .provenance import (
     require_expected_keys,
     require_nonempty_string,
 )
+from .validation_bundle import canonical_json_equal, compute_validation_plan_id
 
 ANALYSIS_SCHEMA_VERSION = "1.0"
 VALIDATION_BUNDLE_SCHEMA_VERSION = "1.0"
@@ -38,6 +39,64 @@ _BUNDLE_MEMBERS = {
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
 _CONTRAST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_R_RESERVED_WORDS = frozenset(
+    {
+        "if",
+        "else",
+        "repeat",
+        "while",
+        "function",
+        "for",
+        "in",
+        "next",
+        "break",
+        "TRUE",
+        "FALSE",
+        "NULL",
+        "Inf",
+        "NaN",
+        "NA",
+        "NA_integer_",
+        "NA_real_",
+        "NA_complex_",
+        "NA_character_",
+    }
+)
+
+_MANIFEST_KEYS = {"schema_version", "kind", "plan_id", "members"}
+_MEMBER_RECORD_KEYS = {"path", "sha256", "size_bytes"}
+_PLAN_KEYS = {
+    "schema_version",
+    "kind",
+    "plan_id",
+    "validation_scope",
+    "validation",
+    "input",
+}
+_RECEIPT_KEYS = {
+    "schema_version",
+    "kind",
+    "plan_id",
+    "validation_scope",
+    "data",
+    "warnings",
+    "artifacts",
+}
+_PROVENANCE_KEYS = {
+    "schema_version",
+    "kind",
+    "plan_id",
+    "toolkit",
+    "runtime",
+    "consumed_artifacts",
+    "warnings",
+}
+_EXPECTED_PLAN_VALIDATION_STATE = {
+    "design": "not_run",
+    "backend": "not_run",
+    "runnable": False,
+    "analysis_path_certified": False,
+}
 
 
 @dataclass(frozen=True)
@@ -175,6 +234,59 @@ def _require_sha256(value: Any, *, field: str) -> str:
     return value
 
 
+def _require_exact_evidence_schema(
+    value: Any,
+    *,
+    expected_keys: set[str],
+    context: str,
+) -> Mapping[str, Any]:
+    """Require an exact object schema for already-generated bundle evidence."""
+
+    if not isinstance(value, Mapping):
+        raise InputIntegrityError(
+            "A validation-bundle evidence record is not an object.",
+            details={"context": context, "observed_type": type(value).__name__},
+        )
+    observed_keys = set(value)
+    if observed_keys != expected_keys:
+        raise InputIntegrityError(
+            "A validation-bundle evidence object has an incompatible schema.",
+            details={
+                "context": context,
+                "missing_keys": sorted(expected_keys - observed_keys),
+                "unknown_keys": sorted(observed_keys - expected_keys),
+            },
+        )
+    return value
+
+
+def _require_warning_inventory(value: Any, *, context: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise InputIntegrityError(
+            "A validation warning inventory must be an array.",
+            details={"context": context, "observed_type": type(value).__name__},
+        )
+    for index, warning in enumerate(value):
+        warning_context = f"{context}[{index}]"
+        record = _require_exact_evidence_schema(
+            warning,
+            expected_keys={"code", "severity", "message", "details"},
+            context=warning_context,
+        )
+        for field in ("code", "severity", "message"):
+            if not isinstance(record[field], str) or not record[field]:
+                raise InputIntegrityError(
+                    "A validation warning contains an invalid string field.",
+                    details={"context": warning_context, "field": field},
+                )
+        if not isinstance(record["details"], Mapping):
+            raise InputIntegrityError(
+                "A validation warning details field must be an object.",
+                details={"context": warning_context},
+            )
+    return value
+
+
 def _read_verified_bundle(
     bundle_path: Path,
 ) -> tuple[
@@ -213,10 +325,9 @@ def _read_verified_bundle(
         document_role="validation_bundle_manifest",
         content=manifest_content,
     )
-    require_expected_keys(
+    _require_exact_evidence_schema(
         manifest,
-        allowed={"schema_version", "kind", "plan_id", "members"},
-        required={"schema_version", "kind", "plan_id", "members"},
+        expected_keys=_MANIFEST_KEYS,
         context="validation bundle manifest",
     )
     if (
@@ -254,10 +365,9 @@ def _read_verified_bundle(
                 "A validation-bundle member record must be an object.",
                 details={"member_index": index},
             )
-        require_expected_keys(
+        _require_exact_evidence_schema(
             member,
-            allowed={"path", "sha256", "size_bytes"},
-            required={"path", "sha256", "size_bytes"},
+            expected_keys=_MEMBER_RECORD_KEYS,
             context=f"validation bundle member {index}",
         )
         name = member["path"]
@@ -324,6 +434,21 @@ def _read_verified_bundle(
     plan = member_documents["input_plan.json"]
     receipt = member_documents["validated_request.json"]
     provenance = member_documents["provenance.json"]
+    _require_exact_evidence_schema(
+        plan,
+        expected_keys=_PLAN_KEYS,
+        context="input_plan.json",
+    )
+    _require_exact_evidence_schema(
+        receipt,
+        expected_keys=_RECEIPT_KEYS,
+        context="validated_request.json",
+    )
+    _require_exact_evidence_schema(
+        provenance,
+        expected_keys=_PROVENANCE_KEYS,
+        context="provenance.json",
+    )
     expected_identities = {
         "input_plan.json": ("input_plan", "input_semantics_only"),
         "validated_request.json": (
@@ -350,11 +475,53 @@ def _read_verified_bundle(
                 details={"path": name},
             )
 
+    receipt_data = receipt["data"]
+    receipt_artifacts = receipt["artifacts"]
+    receipt_warnings = _require_warning_inventory(
+        receipt["warnings"], context="validated_request.warnings"
+    )
+    if not isinstance(receipt_data, Mapping):
+        raise InputIntegrityError("The validated receipt data field must be an object.")
+    if not isinstance(receipt_artifacts, list):
+        raise InputIntegrityError(
+            "The validated receipt artifact inventory must be an array."
+        )
+    recomputed_plan_id = compute_validation_plan_id(
+        {
+            "data": receipt_data,
+            "warnings": receipt_warnings,
+            "artifacts": receipt_artifacts,
+        }
+    )
+    if recomputed_plan_id != plan_id:
+        raise InputIntegrityError(
+            "The declared validation plan identity cannot be derived from its receipt.",
+            details={
+                "reason": "plan_id_recomputed_mismatch",
+                "declared_plan_id": plan_id,
+                "recomputed_plan_id": recomputed_plan_id,
+            },
+        )
+
     input_data = plan.get("input")
     validation = plan.get("validation")
     if not isinstance(input_data, Mapping) or not isinstance(validation, Mapping):
         raise InputIntegrityError(
             "The validated input plan is structurally incomplete."
+        )
+    if not canonical_json_equal(receipt_data, input_data):
+        raise InputIntegrityError(
+            "The validated receipt and input plan contain different normalized inputs.",
+            details={"reason": "normalized_input_mismatch"},
+        )
+    expected_validation = {
+        **_EXPECTED_PLAN_VALIDATION_STATE,
+        "input_semantics": receipt_data.get("input_certification_status"),
+    }
+    if not canonical_json_equal(validation, expected_validation):
+        raise InputIntegrityError(
+            "The input plan validation state has an incompatible schema or value.",
+            details={"reason": "plan_validation_state_mismatch"},
         )
     eligibility_checks = {
         "plan.input_semantics": validation.get("input_semantics") == "passed",
@@ -383,18 +550,47 @@ def _read_verified_bundle(
             raise InvalidRequestError(
                 "The three-prime input route is not permitted for certified execution."
             )
-    if receipt.get("data") != input_data:
-        raise InputIntegrityError(
-            "The validated receipt and input plan contain different normalized inputs."
-        )
-    consumed = receipt.get("artifacts")
+    consumed = receipt_artifacts
     if not isinstance(consumed, list) or not consumed:
         raise InputIntegrityError(
             "The validated receipt lacks its consumed-artifact inventory."
         )
-    if provenance.get("consumed_artifacts") != consumed:
+    provenance_warnings = _require_warning_inventory(
+        provenance["warnings"], context="provenance.warnings"
+    )
+    if not canonical_json_equal(provenance_warnings, receipt_warnings):
         raise InputIntegrityError(
-            "The validation provenance and receipt artifact inventories disagree."
+            "The validation provenance and receipt warning inventories disagree.",
+            details={"reason": "validation_warnings_mismatch"},
+        )
+    if not canonical_json_equal(provenance["consumed_artifacts"], consumed):
+        raise InputIntegrityError(
+            "The validation provenance and receipt artifact inventories disagree.",
+            details={"reason": "validation_artifacts_mismatch"},
+        )
+    toolkit = _require_exact_evidence_schema(
+        provenance["toolkit"],
+        expected_keys={"name", "version"},
+        context="provenance.toolkit",
+    )
+    runtime = _require_exact_evidence_schema(
+        provenance["runtime"],
+        expected_keys={"python", "implementation", "platform"},
+        context="provenance.runtime",
+    )
+    if (
+        toolkit["name"] != "rnaseq-downstream"
+        or not isinstance(toolkit["version"], str)
+        or not toolkit["version"]
+    ):
+        raise InputIntegrityError(
+            "The validation provenance toolkit identity is incompatible."
+        )
+    if any(
+        not isinstance(runtime[field], str) or not runtime[field] for field in runtime
+    ):
+        raise InputIntegrityError(
+            "The validation provenance runtime identity is incomplete."
         )
     normalized_artifacts: list[dict[str, Any]] = []
     for index, artifact in enumerate(consumed):
@@ -409,6 +605,12 @@ def _read_verified_bundle(
                 "A consumed-artifact record is incompatible.",
                 details={"artifact_index": index},
             )
+        for field in ("role", "declared_path", "path"):
+            if not isinstance(artifact.get(field), str) or not artifact[field]:
+                raise InputIntegrityError(
+                    "A consumed-artifact string field is invalid.",
+                    details={"artifact_index": index, "field": field},
+                )
         _require_sha256(artifact.get("sha256"), field=f"artifacts[{index}].sha256")
         if (
             isinstance(artifact.get("size_bytes"), bool)
@@ -453,6 +655,11 @@ def _parse_design(value: Any) -> dict[str, Any]:
             raise InvalidRequestError(
                 "Design term names must use a conservative R-safe identifier grammar.",
                 details={"term": name},
+            )
+        if name in _R_RESERVED_WORDS:
+            raise InvalidRequestError(
+                "Design term names must not be R reserved words.",
+                details={"term": name, "reason": "r_reserved_word"},
             )
         normalized_terms.append(name)
     if len(set(normalized_terms)) != len(normalized_terms):

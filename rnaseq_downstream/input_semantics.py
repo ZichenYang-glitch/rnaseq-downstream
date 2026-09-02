@@ -1162,6 +1162,7 @@ def _process_salmon(
 
     replicate_summary, replicate_certifiable = _summarize_replicates(
         replicate_records,
+        input_semantics=semantics,
         validation_level=validation_level,
         warnings=warnings,
     )
@@ -1170,6 +1171,8 @@ def _process_salmon(
         use_replicate_overdispersion = (
             replicate_summary["state"] == "all"
             and replicate_summary["consistent_method_and_count"]
+            and replicate_summary["replicate_count"] is not None
+            and replicate_summary["replicate_count"] >= 2
         )
         route = {
             "tximport": {
@@ -1947,6 +1950,7 @@ def _validate_replicate_values(
 def _summarize_replicates(
     records: Sequence[Mapping[str, Any]],
     *,
+    input_semantics: str,
     validation_level: str,
     warnings: list[dict[str, Any]],
 ) -> tuple[dict[str, Any], bool]:
@@ -1960,8 +1964,10 @@ def _summarize_replicates(
     methods = {record["method"] for record in records if record["present"]}
     counts = {record["count"] for record in records if record["present"]}
     consistent = len(methods) <= 1 and len(counts) <= 1
+    certifiable = state != "mixed" and consistent
     if state == "mixed" or not consistent:
         details = {
+            "reason": "inferential_replicates_inconsistent",
             "state": state,
             "consistent_method_and_count": consistent,
             "per_sample": [dict(record) for record in records],
@@ -1979,14 +1985,49 @@ def _summarize_replicates(
                 "details": details,
             }
         )
+        certifiable = False
+
+    replicate_count = next(iter(counts)) if len(counts) == 1 else None
+    if (
+        input_semantics == SALMON_FULL_LENGTH
+        and state == "all"
+        and consistent
+        and replicate_count == 1
+    ):
+        details = {
+            "reason": "inferential_replicate_count_below_minimum",
+            "input_semantics": input_semantics,
+            "observed_replicates_per_sample": replicate_count,
+            "minimum_replicates_per_sample": 2,
+            "per_sample": [dict(record) for record in records],
+        }
+        if validation_level == "validate":
+            raise InputValidationError(
+                "Full-length Salmon inferential overdispersion requires at least "
+                "two replicates per sample.",
+                details=details,
+            )
+        warnings.append(
+            {
+                "code": "INFERENTIAL_REPLICATES_INSUFFICIENT",
+                "severity": "high",
+                "message": (
+                    "A single inferential replicate per sample cannot estimate "
+                    "the full-length Salmon overdispersion adjustment."
+                ),
+                "details": details,
+            }
+        )
+        certifiable = False
+
     summary = {
         "state": state,
         "consistent_method_and_count": consistent,
         "method": next(iter(methods)) if len(methods) == 1 else None,
-        "replicate_count": next(iter(counts)) if len(counts) == 1 else None,
+        "replicate_count": replicate_count,
         "per_sample": [dict(record) for record in records],
     }
-    return summary, state != "mixed" and consistent
+    return summary, certifiable
 
 
 def _read_tsv(

@@ -742,6 +742,65 @@ def test_full_length_all_inferential_replicates_enable_dgelist_divide(
     assert len(replicate_roles) == 4
 
 
+def test_full_length_single_inferential_replicate_is_inspectable_but_ineligible(
+    tmp_path: Path,
+) -> None:
+    request_path, _ = _salmon_request(tmp_path, replicate_counts=(1, 1))
+
+    result = inspect_request(request_path)
+
+    summary = result["data"]["salmon"]["inferential_replicates"]
+    assert summary["state"] == "all"
+    assert summary["consistent_method_and_count"] is True
+    assert summary["replicate_count"] == 1
+    assert result["data"]["input_certification_eligible"] is False
+    assert result["data"]["input_certification_status"] == "ineligible"
+    assert result["data"]["input_certification_reasons"] == [
+        "INFERENTIAL_REPLICATES_INSUFFICIENT"
+    ]
+    assert result["data"]["route"]["edgeR_options"] == {"divide": False}
+    assert result["data"]["route"]["inferential_overdispersion"] == {
+        "enabled": False,
+        "source": "tximport.infReps",
+        "relative_abundance_adjustment": False,
+    }
+    warning = result["warnings"][-1]
+    assert warning["code"] == "INFERENTIAL_REPLICATES_INSUFFICIENT"
+    assert warning["severity"] == "high"
+    assert warning["details"]["minimum_replicates_per_sample"] == 2
+
+
+def test_full_length_single_inferential_replicate_fails_validation(
+    tmp_path: Path,
+) -> None:
+    request_path, _ = _salmon_request(tmp_path, replicate_counts=(1, 1))
+
+    with pytest.raises(InputValidationError) as raised:
+        validate_request(request_path)
+
+    assert raised.value.code.value == "INPUT_VALIDATION_FAILED"
+    assert raised.value.details["reason"] == "inferential_replicate_count_below_minimum"
+    assert raised.value.details["observed_replicates_per_sample"] == 1
+    assert raised.value.details["minimum_replicates_per_sample"] == 2
+
+
+def test_three_prime_single_inferential_replicate_remains_valid(
+    tmp_path: Path,
+) -> None:
+    request_path, _ = _salmon_request(
+        tmp_path,
+        three_prime=True,
+        replicate_counts=(1, 1),
+    )
+
+    result = validate_request(request_path)
+
+    assert result["data"]["input_certification_eligible"] is True
+    assert result["data"]["salmon"]["inferential_replicates"]["replicate_count"] == 1
+    assert "edgeR_options" not in result["data"]["route"]
+    assert "inferential_overdispersion" not in result["data"]["route"]
+
+
 def test_gibbs_replicates_are_detected_without_conflating_bootstrap_zero(
     tmp_path: Path,
 ) -> None:

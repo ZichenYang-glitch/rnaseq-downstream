@@ -74,7 +74,7 @@ silently rounded, filled, intersected, renamed, or dropped.
 `inspect_request` verifies the JSON schema, resolves and hashes all consumed
 files, checks typed upstream evidence, reads metadata and identifiers, validates
 sample and identifier identity, validates Salmon metadata and inferential
-archive structure, and normalizes the future route. It intentionally does not
+archive structure, and normalizes the declared downstream route. It intentionally does not
 claim that assay count values have passed their full numeric-domain checks.
 Mixed inferential-replicate evidence is
 reported as a high-risk warning and makes the input ineligible.
@@ -85,7 +85,11 @@ reported as a high-risk warning and makes the input ineligible.
 - validates Salmon numeric fields against an explicit decimal grammar, finite
   downstream IEEE-754 range, and their documented domain;
 - fails when inferential replicates are mixed across samples or their method and
-  replicate count are inconsistent.
+  replicate count are inconsistent; and
+- fails a full-length request when exactly one inferential replicate is declared
+  per sample, because at least two are required to estimate inferential
+  overdispersion. The three-prime route does not use that adjustment and is not
+  subject to this minimum.
 
 Neither operation validates a design matrix or invokes edgeR.
 
@@ -237,7 +241,7 @@ notation are rejected. Values greater than `2^53 - 1` are also rejected because
 they cannot be represented exactly by the downstream R numeric type. The bound
 is reported as `route.maximum_exact_integer`. No coercion or rounding occurs.
 
-The normalized future route is integer counts to `edgeR::DGEList`, with no
+The normalized execution route is integer counts to `edgeR::DGEList`, with no
 transcript-length offset.
 
 ## `salmon_quant_dirs_full_length`
@@ -302,8 +306,8 @@ transcript order. The uncompressed little-endian f64 payload in
 nonnegative values. Legacy little-endian i32 payloads accepted by locked
 tximport 1.40 are also recognized explicitly. In either encoding, the metadata
 target count must equal the quantification row count. The locked tximport import
-remains a backend integration check in the next work item; this structural gate
-does not replace it.
+is checked again at the R process boundary; this structural gate does not
+replace that independent backend check.
 
 All samples must contain the same transcripts in the same order. tx2gene must
 map that exact transcript set, with every transcript appearing exactly once.
@@ -319,18 +323,20 @@ bootstrap or Gibbs count to be present and equal; an irrelevant positive count
 or any contradiction is rejected. Integer evidence is bounded at `2^53 - 1`,
 and an explicit zero is not treated as a missing field. Inferential replicates are
 classified as `all`, `none`, or `mixed`. When every sample has the same
-replicate method and count, the full-length route records
-future use of `tximport.infReps` for relative-abundance-adjusted inferential
-overdispersion. `edgeR_options.divide` is true only in that case. Mixed or
-inconsistent replicate evidence fails `validate`.
+replicate method and a count of at least two, the full-length route uses
+`tximport.infReps` for relative-abundance-adjusted inferential overdispersion.
+`edgeR_options.divide` is true only in that case. A count of zero is valid and
+uses `divide = false`. A count of one makes `inspect` high-risk/ineligible and
+fails `validate`. Mixed or inconsistent replicate evidence also fails
+`validate`.
 
 The normalized full-length route fixes:
 
 - `tximport` `countsFromAbundance = "no"`;
 - `tximport` `dropInfReps = false`;
 - `edgeR::DGEListFromTximport`;
-- `DGEListFromTximport(..., divide = true)` only when every sample has
-  consistent inferential replicates;
+- `DGEListFromTximport(..., divide = true)` only when every sample has the same
+  method and at least two inferential replicates;
 - a required transcript-length offset.
 
 ## `salmon_quant_dirs_three_prime`

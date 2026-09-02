@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 
 import pytest
 
@@ -18,6 +19,7 @@ from rnaseq_downstream.errors import (
     ContrastNotEstimableError,
     DesignRankDeficientError,
 )
+from rnaseq_downstream.input_semantics import inspect_request
 from rnaseq_downstream.validation_bundle import validate_request_to_bundle
 
 
@@ -527,7 +529,8 @@ def _salmon_request(
 
 
 @pytest.mark.parametrize(
-    ("three_prime", "inferential_replicates"), [(False, 3), (True, 0)]
+    ("three_prime", "inferential_replicates"),
+    [(False, 0), (False, 2), (True, 0), (True, 1)],
 )
 def test_locked_salmon_routes_execute(
     tmp_path: Path,
@@ -561,5 +564,77 @@ def test_locked_salmon_routes_execute(
     else:
         assert route["constructor"] == "edgeR::DGEListFromTximport"
         assert route["transcript_length_offset"] is True
-        assert route["divide"] is True
-        assert route["inferential_replicates_imported"] is True
+        assert route["divide"] is (inferential_replicates >= 2)
+        assert route["inferential_replicates_imported"] is (inferential_replicates > 0)
+
+
+def test_locked_r_backend_independently_rejects_one_full_length_replicate(
+    tmp_path: Path,
+) -> None:
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / "single-replicate-defense"
+    request_path = _salmon_request(
+        root,
+        three_prime=False,
+        inferential_replicates=1,
+    )
+    inspected = inspect_request(request_path)
+    input_data = inspected["data"]
+    samples = input_data["sample_order"]
+    input_data["metadata_values"] = {
+        "sample_id": samples,
+        "condition": ["control"] * 3 + ["treated"] * 3,
+    }
+    backend_request = _write_json(
+        root / "normalized-backend-request.json",
+        {
+            "schema_version": "1.0",
+            "kind": "edger_ql_backend_request",
+            "execution_scope": "adversarial_test_only",
+            "analysis_request": {"path": str(request_path), "sha256": "a" * 64},
+            "input_evidence": {"plan_id": "b" * 64},
+            "input": input_data,
+            "design": _design(),
+            "contrasts": _contrasts(),
+        },
+    )
+    output = root / "must-not-exist"
+    environment = os.environ.copy()
+    environment["R_LIBS_USER"] = r_library
+    script = (
+        Path(__file__).resolve().parents[2]
+        / "rnaseq_downstream"
+        / "r_scripts"
+        / "edger_ql.R"
+    )
+
+    completed = subprocess.run(
+        [rscript, "--vanilla", str(script), str(backend_request), str(output)],
+        check=False,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="strict",
+        env=environment,
+    )
+
+    assert completed.returncode == 4
+    response = json.loads(completed.stdout)
+    assert response["status"] == "error"
+    assert response["errors"] == [
+        {
+            "code": "BACKEND_FAILED",
+            "message": (
+                "Full-length Salmon inferential overdispersion requires at "
+                "least two replicates per sample."
+            ),
+            "details": {
+                "reason": "inferential_replicate_count_below_minimum",
+                "observed_replicates_per_sample": 1,
+                "minimum_replicates_per_sample": 2,
+            },
+        }
+    ]
+    assert not output.exists()

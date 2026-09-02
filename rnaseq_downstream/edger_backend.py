@@ -740,7 +740,19 @@ def _capture_output_json(path: Path, *, role: str) -> tuple[dict[str, Any], str,
             "A backend JSON artifact changed during verification.",
             details={"path": str(path), "role": role},
         )
-    document = read_json_object(path, document_role=role, content=content)
+    try:
+        document = read_json_object(path, document_role=role, content=content)
+    except (InvalidRequestError, InputReadError) as error:
+        raise BackendFailedError(
+            "A backend JSON artifact does not contain a valid strict JSON object.",
+            details={
+                "path": str(path),
+                "role": role,
+                "parse_error_code": error.code.value,
+                "parse_error_details": dict(error.details),
+            },
+            cause=error,
+        ) from error
     return document, hashlib.sha256(content).hexdigest(), len(content)
 
 
