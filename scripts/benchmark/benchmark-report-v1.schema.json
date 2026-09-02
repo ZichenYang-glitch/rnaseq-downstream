@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ZichenYang-glitch/rnaseq-downstream/main/scripts/benchmark/benchmark-report-v1.schema.json",
+  "title": "rnaseq-downstream P0 benchmark report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_id",
+    "status",
+    "runtime",
+    "implementation",
+    "inputs",
+    "artifacts",
+    "thresholds",
+    "metrics",
+    "assertions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rnaseq-downstream-benchmark-report-v1"
+    },
+    "benchmark_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": ["pass", "fail"]
+    },
+    "runtime": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "implementation": {
+      "$ref": "#/$defs/fileRecords"
+    },
+    "inputs": {
+      "$ref": "#/$defs/fileRecords"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/fileRecord"}
+    },
+    "thresholds": {
+      "type": "object"
+    },
+    "metrics": {
+      "type": "object"
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "passed", "observed", "requirement"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "passed": {"type": "boolean"},
+          "observed": {},
+          "requirement": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fileRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "fileRecords": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/fileRecord"}
+    }
+  }
+}

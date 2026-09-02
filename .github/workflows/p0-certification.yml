@@ -1,0 +1,82 @@
+name: P0 certification
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p0-certification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  locked-oracle-and-simulation:
+    name: Locked edgeR oracle and simulation gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      P0_PREFIX: ${{ runner.temp }}/rnaseq-downstream-p0
+      RNASEQ_P0_R_LIBRARY: ${{ runner.temp }}/rnaseq-downstream-p0-r-library
+      RNASEQ_P0_BENCHMARK_REPORT_DIR: ${{ github.workspace }}/benchmark-results
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install the Conda bootstrap tool
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          activate-environment: ""
+          auto-activate: true
+          miniforge-version: latest
+
+      - name: Install the reviewed conda-lock frontend
+        shell: bash -el {0}
+        run: python -m pip install --disable-pip-version-check conda-lock==4.0.1
+
+      - name: Restore the exact locked Conda prefix
+        shell: bash -el {0}
+        run: conda-lock install --prefix "$P0_PREFIX" conda-lock.yml
+
+      - name: Install the toolkit without resolving new dependencies
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX"
+          python -m pip install --no-deps --no-build-isolation -e .
+
+      - name: Restore the exact R and Bioconductor library from source locks
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX"
+          Rscript --vanilla environment/bootstrap.R
+          --library "$RNASEQ_P0_R_LIBRARY"
+
+      - name: Verify the locked runtime identity
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX"
+          Rscript --vanilla environment/verify.R
+          --library "$RNASEQ_P0_R_LIBRARY"
+
+      - name: Run non-skippable P0 certification tests
+        shell: bash -el {0}
+        env:
+          RNASEQ_P0_REQUIRE_BENCHMARKS: "1"
+          RNASEQ_P0_RSCRIPT: ${{ runner.temp }}/rnaseq-downstream-p0/bin/Rscript
+        run: >-
+          conda run --prefix "$P0_PREFIX" --no-capture-output
+          python -m pytest
+          tests/unit tests/integration tests/oracle tests/simulation -v
+
+      - name: Archive machine-readable benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: p0-benchmark-reports
+          path: benchmark-results/*.json
+          if-no-files-found: warn
+          retention-days: 90

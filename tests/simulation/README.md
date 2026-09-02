@@ -1,9 +1,11 @@
-# compcodeR simulation scaffold — not certified
+# compcodeR negative-binomial FDR/TPR gate
 
-This directory is reserved for the P0 negative-binomial simulation gate. The
-future implementation must freeze the compcodeR version, simulation seed,
-scenario parameters, FDR/TPR thresholds, and benchmark JSON schema in CI.
+This directory contains the P0 backend-kernel simulation gate. It freezes
+compcodeR 1.48.0, seeds 5001 through 5010, ten balanced negative-binomial
+replicates, and the hard FDR/TPR thresholds documented in
+`scripts/benchmark/README.md`.
 
-The current test is explicitly skipped because none of that scientific gate
-has been implemented. Its presence provides **no FDR-control evidence** and
-**no scientific certification**.
+The test regenerates all counts and truth labels, invokes the private backend
+adapter, evaluates calls at BH FDR 0.05, and archives a strict JSON report. It
+does not treat the synthetic matrices as featureCounts output and does not
+certify the public input route.
