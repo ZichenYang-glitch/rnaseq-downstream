@@ -12,9 +12,9 @@ from typing import Any
 from . import __version__
 from .contracts import Status, build_envelope, write_json_document
 from .errors import (
+    BackendFailedError,
     ErrorCode,
     ExitCode,
-    FeatureNotImplementedError,
     InternalToolkitError,
     InvalidRequestError,
     ToolkitError,
@@ -109,14 +109,24 @@ def _build_parser() -> _JsonArgumentParser:
     validate.add_argument("--output-dir", required=True, metavar="DIRECTORY")
     validate.set_defaults(handler=_validate)
 
-    reserved_help = {
-        "run": "Execute the planned evidence-gated analysis path.",
-        "summarize": "Summarize a completed run from machine-readable artifacts.",
-    }
-    for command, help_text in reserved_help.items():
-        command_parser = subparsers.add_parser(command, help=help_text)
-        command_parser.command_name = command
-        command_parser.set_defaults(handler=_reserved_command)
+    run = subparsers.add_parser(
+        "run",
+        help="Execute the evidence-gated edgeR v4 QL analysis path.",
+    )
+    run.command_name = "run"
+    run.add_argument("--request", required=True, metavar="ANALYSIS_REQUEST.json")
+    run.add_argument("--output-dir", required=True, metavar="DIRECTORY")
+    run.add_argument("--rscript", default="Rscript", metavar="EXECUTABLE")
+    run.add_argument("--r-library", default=None, metavar="DIRECTORY")
+    run.set_defaults(handler=_run)
+
+    summarize = subparsers.add_parser(
+        "summarize",
+        help="Verify and summarize a complete public edgeR result bundle.",
+    )
+    summarize.command_name = "summarize"
+    summarize.add_argument("--run-dir", required=True, metavar="DIRECTORY")
+    summarize.set_defaults(handler=_summarize)
 
     return parser
 
@@ -147,8 +157,8 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
             "capabilities": "implemented",
             "inspect": "implemented_input_semantics_read_only",
             "validate": "implemented_input_semantics_only",
-            "run": "reserved_not_implemented",
-            "summarize": "reserved_not_implemented",
+            "run": "implemented_edger_ql_p0",
+            "summarize": "implemented_verified_result_bundle",
         },
         "validated_input_semantics": [
             "featurecounts_integer",
@@ -156,6 +166,31 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
             "salmon_quant_dirs_three_prime",
         ],
         "certified_analysis_paths": [],
+        "evidence_gated_analysis_paths": [
+            {
+                "path_id": "edger_ql_p0_v1",
+                "maturity": "research_preview",
+                "execution_scope": "validated_p0_input",
+                "backend": "edgeR_QL",
+                "pipeline": [
+                    "filterByExpr",
+                    "normLibSizes:TMM",
+                    "glmQLFit:legacy_false_robust_true",
+                    "glmQLFTest_or_glmTreat",
+                ],
+                "benchmark_evidence": [
+                    "airway-edger-ql-same-engine-v1",
+                    "compcoder-edger-ql-nb-fdr-tpr-v1",
+                ],
+                "benchmark_scope": "backend_kernel_only",
+                "input_route_evidence": (
+                    "validation_contract_plus_locked_integration_tests"
+                ),
+                "combined_manifest_origin_authentication": ("self_attested_not_proven"),
+                "end_to_end_publication_grade_claim": False,
+                "publication_grade_claim": False,
+            }
+        ],
     }
 
 
@@ -214,14 +249,79 @@ def _validate(arguments: argparse.Namespace) -> _CommandResult:
     )
 
 
-def _reserved_command(arguments: argparse.Namespace) -> dict[str, Any]:
-    raise FeatureNotImplementedError(
-        f"The '{arguments.command}' command is reserved but not implemented in this checkpoint.",
-        details={
-            "command": arguments.command,
-            "checkpoint": "P0_checkpoint_A_work_items_3_4",
-        },
+def _run(arguments: argparse.Namespace) -> _CommandResult:
+    from .edger_backend import run_edger_ql
+
+    completed = run_edger_ql(
+        arguments.request,
+        arguments.output_dir,
+        rscript=arguments.rscript,
+        r_library=arguments.r_library,
     )
+    if (
+        completed.get("status") != "success"
+        or completed.get("execution_scope") != "validated_p0_input"
+    ):
+        raise BackendFailedError(
+            "The edgeR adapter returned an incompatible completion record."
+        )
+    backend_stderr = completed.get("backend_stderr", "")
+    if not isinstance(backend_stderr, str):
+        raise BackendFailedError("The edgeR adapter returned invalid backend logs.")
+    if backend_stderr:
+        sys.stderr.write(backend_stderr)
+        sys.stderr.flush()
+    backend_data = completed.get("data")
+    if not isinstance(backend_data, Mapping):
+        raise BackendFailedError("The edgeR adapter omitted its completion data.")
+    data = {
+        "scope": {
+            "analysis_path": "edger_ql_p0_v1",
+            "execution_scope": "validated_p0_input",
+            "input_semantics": "passed",
+            "design": "passed",
+            "backend": "passed",
+            "evidence_status": "evidence_gated_research_preview",
+            "benchmark_scope": "backend_kernel_only",
+            "input_route_evidence": (
+                "validation_contract_plus_locked_integration_tests"
+            ),
+            "combined_manifest_origin_authentication": "self_attested_not_proven",
+            "publication_grade_claim": False,
+        },
+        "backend": completed["backend"],
+        "output_dir": completed["output_dir"],
+        "publication_status": completed["publication_status"],
+        "plan_id": completed["plan_id"],
+        "analysis_request_sha256": completed["analysis_request_sha256"],
+        "runtime_identity": backend_data.get("runtime_identity"),
+        "input_semantics": backend_data.get("input_semantics"),
+        "route_observed": backend_data.get("route_observed"),
+        "design": {
+            "columns": backend_data.get("design_columns"),
+            "rank": backend_data.get("design_rank"),
+            "residual_df": backend_data.get("residual_df"),
+        },
+        "gene_counts": {
+            "total": backend_data.get("gene_count"),
+            "tested": backend_data.get("tested_gene_count"),
+            "filtered": backend_data.get("filtered_gene_count"),
+        },
+        "contrasts": backend_data.get("contrasts"),
+    }
+    return _CommandResult(
+        data=data,
+        warnings=tuple(completed.get("warnings", ())),
+        artifacts=tuple(completed.get("artifacts", ())),
+    )
+
+
+def _summarize(arguments: argparse.Namespace) -> _CommandResult:
+    from .run_summary import summarize_run
+
+    completed = summarize_run(arguments.run_dir)
+    artifacts = completed.pop("artifacts")
+    return _CommandResult(data=completed, artifacts=tuple(artifacts))
 
 
 def _infer_command(arguments: Sequence[str]) -> str:

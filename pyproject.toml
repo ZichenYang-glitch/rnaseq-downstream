@@ -30,4 +30,4 @@ where = ["."]
 include = ["rnaseq_downstream*"]
 
 [tool.setuptools.package-data]
-rnaseq_downstream = ["py.typed"]
+rnaseq_downstream = ["py.typed", "r_scripts/*.R"]

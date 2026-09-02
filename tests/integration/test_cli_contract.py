@@ -98,6 +98,75 @@ def _featurecounts_request(
     return request_path
 
 
+def _runnable_featurecounts_request(root: Path) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    samples = [f"s{index + 1}" for index in range(6)]
+    (root / "metadata.tsv").write_text(
+        "sample_id\tcondition\n"
+        + "\n".join(
+            f"{sample}\t{'control' if index < 3 else 'treated'}"
+            for index, sample in enumerate(samples)
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    reference = root / "reference.fa"
+    reference.write_text(">synthetic\nACGT\n", encoding="utf-8")
+    matrix = root / "counts.tsv"
+    lines = ["\t".join(["gene_id", "gene_name", *samples])]
+    for index in range(40):
+        baseline = 40 + (index % 7)
+        values = [baseline] * 3 + [baseline * 4 if index < 8 else baseline] * 3
+        lines.append(
+            "\t".join(
+                [f"gene_{index + 1}", f"GENE_{index + 1}", *(str(v) for v in values)]
+            )
+        )
+    matrix.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _write_json(
+        root / "counts.manifest.json",
+        {
+            "schema_version": "1.0",
+            "artifact_type": "featurecounts_integer_matrix",
+            "artifact": {"path": "counts.tsv", "sha256": _sha256(matrix)},
+            "gene_id_column": "gene_id",
+            "display_columns": ["gene_name"],
+            "sample_columns": samples,
+            "producer": {"name": "featureCounts", "version": "2.0.6"},
+            "reference": {
+                "name": "synthetic",
+                "version": "1",
+                "source": "reference.fa",
+                "sha256": _sha256(reference),
+            },
+        },
+    )
+    request = root / "input-request.json"
+    _write_json(
+        request,
+        {
+            "schema_version": "1.0",
+            "input_semantics": "featurecounts_integer",
+            "metadata": {"path": "metadata.tsv", "sample_id_column": "sample_id"},
+            "producer": {"name": "featureCounts", "version": "2.0.6"},
+            "reference": {
+                "name": "synthetic",
+                "version": "1",
+                "source": "reference.fa",
+                "sha256": _sha256(reference),
+            },
+            "gene_id": {"strip_version": False},
+            "samples": [{"sample_id": sample} for sample in samples],
+            "featurecounts": {
+                "layout": "combined_matrix",
+                "matrix": "counts.tsv",
+                "manifest": "counts.manifest.json",
+            },
+        },
+    )
+    return request
+
+
 def assert_envelope_shape(document: dict, *, command: str, status: str) -> None:
     """Assert the stable, machine-oriented top-level response contract."""
 
@@ -121,6 +190,14 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
     assert document["errors"] == []
     assert document["data"]["toolkit"]["maturity"] == "research_preview"
     assert document["data"]["certified_analysis_paths"] == []
+    paths = document["data"]["evidence_gated_analysis_paths"]
+    assert [path["path_id"] for path in paths] == ["edger_ql_p0_v1"]
+    assert paths[0]["maturity"] == "research_preview"
+    assert paths[0]["benchmark_scope"] == "backend_kernel_only"
+    assert paths[0]["combined_manifest_origin_authentication"] == (
+        "self_attested_not_proven"
+    )
+    assert paths[0]["publication_grade_claim"] is False
     assert "NaN" not in result.stdout
     assert "Infinity" not in result.stdout
     assert result.stderr == ""
@@ -231,16 +308,178 @@ def test_legacy_checkout_resolves_flat_error_package_without_site_packages() -> 
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("command", ["run", "summarize"])
-def test_unimplemented_p0_stages_fail_explicitly(run_module_cli, command: str) -> None:
-    result = run_module_cli(command)
+@pytest.mark.parametrize(
+    ("arguments", "command"),
+    [
+        (("run",), "run"),
+        (("run", "--request", "analysis-request.json"), "run"),
+        (("summarize",), "summarize"),
+    ],
+)
+def test_analysis_commands_require_explicit_noninteractive_arguments(
+    run_module_cli,
+    arguments: tuple[str, ...],
+    command: str,
+) -> None:
+    result = run_module_cli(*arguments)
 
     assert result.returncode == 2
     document = result.json()
     assert_envelope_shape(document, command=command, status="error")
-    assert document["errors"]
-    assert document["errors"][0]["code"] == "FEATURE_NOT_IMPLEMENTED"
+    assert document["errors"][0]["code"] == "INVALID_REQUEST"
+    assert "usage" in document["errors"][0]["details"]
     assert result.stderr == ""
+
+
+@pytest.mark.integration
+def test_public_summarize_missing_bundle_is_structured_json(
+    run_module_cli, tmp_path: Path
+) -> None:
+    result = run_module_cli(
+        "summarize", "--run-dir", str(tmp_path / "missing-results"), cwd=tmp_path
+    )
+
+    assert result.returncode == 2
+    document = result.json()
+    assert_envelope_shape(document, command="summarize", status="error")
+    assert document["errors"][0]["code"] == "INPUT_READ_FAILED"
+    assert document["errors"][0]["details"]["operation"] == "open_result_bundle"
+    assert result.stderr == ""
+
+
+@pytest.mark.integration
+def test_packaged_r_backend_is_readable_outside_checkout_cwd(tmp_path: Path) -> None:
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    source = (
+        "import hashlib, importlib.resources, json; "
+        "resource = importlib.resources.files('rnaseq_downstream').joinpath("
+        "'r_scripts', 'edger_ql.R'); "
+        "content = resource.read_bytes(); "
+        "print(json.dumps({'name': resource.name, 'size': len(content), "
+        "'sha256': hashlib.sha256(content).hexdigest()}))"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", source],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=CLI_TIMEOUT_SECONDS,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stderr == ""
+    assert completed.stdout.count("\n") == 1
+    document = json.loads(completed.stdout)
+    assert document["name"] == "edger_ql.R"
+    assert document["size"] > 1000
+    assert len(document["sha256"]) == 64
+
+
+@pytest.mark.integration
+def test_locked_cli_chain_validate_run_and_summarize(
+    run_module_cli, tmp_path: Path
+) -> None:
+    rscript = os.environ.get("RNASEQ_P0_RSCRIPT")
+    r_library = os.environ.get("RNASEQ_P0_R_LIBRARY")
+    if not rscript or not r_library:
+        if os.environ.get("RNASEQ_P0_REQUIRE_BENCHMARKS") == "1":
+            pytest.fail(
+                "Certification mode requires RNASEQ_P0_RSCRIPT and "
+                "RNASEQ_P0_R_LIBRARY; the public CLI chain cannot skip"
+            )
+        pytest.skip("the locked R runtime is required for the public CLI chain")
+
+    input_request = _runnable_featurecounts_request(tmp_path / "inputs")
+    inspect_result = run_module_cli(
+        "inspect", "--request", str(input_request), cwd=tmp_path
+    )
+    assert inspect_result.returncode == 0
+    assert_envelope_shape(inspect_result.json(), command="inspect", status="success")
+
+    evidence = tmp_path / "evidence"
+    validate_result = run_module_cli(
+        "validate",
+        "--request",
+        str(input_request),
+        "--output-dir",
+        str(evidence),
+        cwd=tmp_path,
+    )
+    assert validate_result.returncode == 0
+    assert_envelope_shape(validate_result.json(), command="validate", status="success")
+
+    analysis_request = tmp_path / "analysis-request.json"
+    _write_json(
+        analysis_request,
+        {
+            "schema_version": "1.0",
+            "validated_input_bundle": str(evidence),
+            "design": {
+                "intercept": True,
+                "terms": ["condition"],
+                "variables": {
+                    "condition": {
+                        "type": "factor",
+                        "levels": ["control", "treated"],
+                    }
+                },
+            },
+            "contrasts": [
+                {
+                    "contrast_id": "treated_vs_control",
+                    "weights": {"conditiontreated": 1},
+                    "lfc_threshold": 0,
+                }
+            ],
+        },
+    )
+    run_dir = tmp_path / "results"
+    run_result = run_module_cli(
+        "run",
+        "--request",
+        str(analysis_request),
+        "--output-dir",
+        str(run_dir),
+        "--rscript",
+        rscript,
+        "--r-library",
+        r_library,
+        cwd=tmp_path,
+    )
+    assert run_result.returncode == 0, (run_result.stdout, run_result.stderr)
+    run_document = run_result.json()
+    assert_envelope_shape(run_document, command="run", status="success")
+    assert run_document["data"]["scope"]["execution_scope"] == ("validated_p0_input")
+    assert "backend_stderr" not in run_document["data"]
+    assert sorted(path.name for path in run_dir.iterdir()) == [
+        "analysis.json",
+        "backend_manifest.json",
+        "coefficients.tsv",
+        "design.tsv",
+        "results.tsv",
+    ]
+    assert len(run_document["artifacts"]) == 5
+
+    summary_result = run_module_cli(
+        "summarize", "--run-dir", str(run_dir), cwd=tmp_path
+    )
+    assert summary_result.returncode == 0, (
+        summary_result.stdout,
+        summary_result.stderr,
+    )
+    summary_document = summary_result.json()
+    assert_envelope_shape(summary_document, command="summarize", status="success")
+    assert summary_document["data"]["status"] == "verified_complete"
+    assert summary_document["data"]["execution_scope"] == "validated_p0_input"
+    assert summary_document["data"]["gene_count"] == 40
+    assert summary_document["data"]["result_row_count"] == 40
+    assert len(summary_document["artifacts"]) == 5
+    assert summary_result.stderr == ""
 
 
 @pytest.mark.integration

@@ -56,11 +56,11 @@ def test_execute_maps_typed_failures_to_public_contract(
     expected_status: str,
     expected_code: str,
 ) -> None:
-    def fail_reserved_command(_arguments) -> dict:
+    def fail_command(_arguments) -> dict:
         raise failure
 
     if command == "validate":
-        monkeypatch.setattr(cli, "_validate", fail_reserved_command)
+        monkeypatch.setattr(cli, "_validate", fail_command)
         arguments = [
             command,
             "--request",
@@ -69,8 +69,14 @@ def test_execute_maps_typed_failures_to_public_contract(
             "evidence",
         ]
     else:
-        monkeypatch.setattr(cli, "_reserved_command", fail_reserved_command)
-        arguments = [command]
+        monkeypatch.setattr(cli, "_run", fail_command)
+        arguments = [
+            command,
+            "--request",
+            "analysis-request.json",
+            "--output-dir",
+            "results",
+        ]
 
     envelope, exit_code = cli._execute(arguments)
 
@@ -88,10 +94,18 @@ def test_execute_maps_unexpected_failure_to_internal_error(
     def fail_unexpectedly(_arguments) -> dict:
         raise RuntimeError("private implementation detail")
 
-    monkeypatch.setattr(cli, "_reserved_command", fail_unexpectedly)
+    monkeypatch.setattr(cli, "_run", fail_unexpectedly)
 
     with caplog.at_level(logging.ERROR, logger=cli.__name__):
-        envelope, exit_code = cli._execute(["run"])
+        envelope, exit_code = cli._execute(
+            [
+                "run",
+                "--request",
+                "analysis-request.json",
+                "--output-dir",
+                "results",
+            ]
+        )
 
     assert exit_code is ExitCode.INTERNAL_ERROR
     assert envelope["status"] == "error"
@@ -169,3 +183,93 @@ def test_validate_scope_preserves_ineligible_input_status(
         "HIGH_RISK_OVERRIDE",
         "OUTPUT_DURABILITY_UNCONFIRMED",
     ]
+
+
+@pytest.mark.unit
+def test_run_forwards_backend_logs_to_stderr_and_returns_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from rnaseq_downstream import edger_backend
+
+    monkeypatch.setattr(
+        edger_backend,
+        "run_edger_ql",
+        lambda *_args, **_kwargs: {
+            "status": "success",
+            "backend": "edgeR_QL",
+            "execution_scope": "validated_p0_input",
+            "output_dir": "/results",
+            "publication_status": "durability_confirmed",
+            "plan_id": "a" * 64,
+            "analysis_request_sha256": "b" * 64,
+            "data": {
+                "runtime_identity": {"edgeR": "4.10.0"},
+                "input_semantics": "featurecounts_integer",
+                "route_observed": {"constructor": "edgeR::DGEList"},
+                "design_columns": ["(Intercept)", "conditiontreated"],
+                "design_rank": 2,
+                "residual_df": 4,
+                "gene_count": 100,
+                "tested_gene_count": 80,
+                "filtered_gene_count": 20,
+                "contrasts": [{"contrast_id": "treated_vs_control"}],
+            },
+            "warnings": [],
+            "artifacts": [{"role": "results", "path": "/results/results.tsv"}],
+            "backend_stderr": "edgeR diagnostic\n",
+        },
+    )
+
+    envelope, exit_code = cli._execute(
+        [
+            "run",
+            "--request",
+            "analysis-request.json",
+            "--output-dir",
+            "results",
+            "--rscript",
+            "/locked/Rscript",
+            "--r-library",
+            "/locked/library",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code is ExitCode.SUCCESS
+    assert envelope["status"] == "success"
+    assert envelope["data"]["scope"]["analysis_path"] == "edger_ql_p0_v1"
+    assert envelope["data"]["scope"]["benchmark_scope"] == "backend_kernel_only"
+    assert envelope["data"]["scope"]["combined_manifest_origin_authentication"] == (
+        "self_attested_not_proven"
+    )
+    assert envelope["data"]["scope"]["publication_grade_claim"] is False
+    assert envelope["artifacts"][0]["role"] == "results"
+    assert captured.out == ""
+    assert captured.err == "edgeR diagnostic\n"
+
+
+@pytest.mark.unit
+def test_summarize_handler_exposes_verified_data_and_consumed_artifacts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rnaseq_downstream import run_summary
+
+    monkeypatch.setattr(
+        run_summary,
+        "summarize_run",
+        lambda _path: {
+            "schema_version": "1.0",
+            "status": "verified_complete",
+            "contrasts": [],
+            "artifacts": [{"role": "backend_manifest"}],
+        },
+    )
+
+    envelope, exit_code = cli._execute(["summarize", "--run-dir", "results"])
+
+    assert exit_code is ExitCode.SUCCESS
+    assert envelope["status"] == "success"
+    assert envelope["data"]["status"] == "verified_complete"
+    assert "artifacts" not in envelope["data"]
+    assert envelope["artifacts"] == [{"role": "backend_manifest"}]
