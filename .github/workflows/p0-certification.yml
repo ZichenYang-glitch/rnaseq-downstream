@@ -19,8 +19,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
-      P0_PREFIX: ${{ runner.temp }}/rnaseq-downstream-p0
-      RNASEQ_P0_R_LIBRARY: ${{ runner.temp }}/rnaseq-downstream-p0-r-library
+      P0_PREFIX: ${{ github.workspace }}/.ci/rnaseq-downstream-p0
+      RNASEQ_P0_R_LIBRARY: ${{ github.workspace }}/.ci/rnaseq-downstream-p0-r-library
       RNASEQ_P0_BENCHMARK_REPORT_DIR: ${{ github.workspace }}/benchmark-results
 
     steps:
@@ -66,7 +66,7 @@ jobs:
         shell: bash -el {0}
         env:
           RNASEQ_P0_REQUIRE_BENCHMARKS: "1"
-          RNASEQ_P0_RSCRIPT: ${{ runner.temp }}/rnaseq-downstream-p0/bin/Rscript
+          RNASEQ_P0_RSCRIPT: ${{ github.workspace }}/.ci/rnaseq-downstream-p0/bin/Rscript
         run: >-
           conda run --prefix "$P0_PREFIX" --no-capture-output
           python -m pytest
