@@ -456,7 +456,9 @@ def test_joint_design_requires_positive_residual_df() -> None:
 
 
 def test_legacy_qc_module_no_longer_imports_scaled_sklearn_pca() -> None:
-    source = (PROJECT_ROOT / "modules" / "deseq.py").read_text(encoding="utf-8")
+    source = (
+        PROJECT_ROOT / "legacy" / "modules" / "deseq.py"
+    ).read_text(encoding="utf-8")
 
     assert "StandardScaler" not in source
     assert "sklearn.decomposition" not in source
@@ -466,15 +468,16 @@ def test_legacy_qc_module_no_longer_imports_scaled_sklearn_pca() -> None:
 
 
 def test_qc_pca_top_n_is_explicitly_wired_through_both_legacy_callers() -> None:
-    config_source = (PROJECT_ROOT / "config.py").read_text(encoding="utf-8")
-    yaml_source = (PROJECT_ROOT / "workflow_config.yaml").read_text(encoding="utf-8")
-    main_source = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
-    qc_script_source = (PROJECT_ROOT / "scripts" / "run_qc.py").read_text(
+    legacy_root = PROJECT_ROOT / "legacy"
+    config_source = (legacy_root / "config.py").read_text(encoding="utf-8")
+    yaml_source = (legacy_root / "workflow_config.yaml").read_text(encoding="utf-8")
+    main_source = (legacy_root / "main.py").read_text(encoding="utf-8")
+    qc_script_source = (legacy_root / "scripts" / "run_qc.py").read_text(
         encoding="utf-8"
     )
-    snakemake_source = (PROJECT_ROOT / "workflow" / "rules" / "rnaseq.smk").read_text(
-        encoding="utf-8"
-    )
+    snakemake_source = (
+        legacy_root / "workflow" / "rules" / "rnaseq.smk"
+    ).read_text(encoding="utf-8")
 
     assert "'QC_PCA_TOP_N': 500" in config_source
     assert "'QC_BIOLOGY_FACTORS': None" in config_source

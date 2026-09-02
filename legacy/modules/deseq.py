@@ -9,7 +9,7 @@ from pydeseq2.dds import DeseqDataSet
 from pydeseq2.ds import DeseqStats
 from sklearn.metrics import pairwise_distances, silhouette_score
 
-from modules import data
+from legacy.modules import data
 from rnaseq_downstream.errors import QCValidationError
 from rnaseq_downstream.qc_math import (
     PCA_METHOD_ID,

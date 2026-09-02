@@ -12,10 +12,27 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.unit
+def test_legacy_module_help_resolves_without_optional_runtime() -> None:
+    completed = subprocess.run(
+        [sys.executable, "-m", "legacy", "--help"],
+        cwd=PROJECT_ROOT,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert completed.returncode == 0
+    assert "RNA-seq Downstream Analysis Pipeline" in completed.stdout
+    assert completed.stderr == ""
+
+
+@pytest.mark.unit
 def test_integrated_legacy_script_refuses_to_bypass_checkpoint_a(
     tmp_path: Path,
 ) -> None:
-    script = PROJECT_ROOT / "run_integrated_pydeseq2.py"
+    script = PROJECT_ROOT / "legacy" / "run_integrated_pydeseq2.py"
 
     completed = subprocess.run(
         [sys.executable, str(script)],
@@ -36,7 +53,9 @@ def test_integrated_legacy_script_refuses_to_bypass_checkpoint_a(
 
 @pytest.mark.unit
 def test_integrated_legacy_script_contains_no_unsafe_duplicate_analysis() -> None:
-    source = (PROJECT_ROOT / "run_integrated_pydeseq2.py").read_text(encoding="utf-8")
+    source = (
+        PROJECT_ROOT / "legacy" / "run_integrated_pydeseq2.py"
+    ).read_text(encoding="utf-8")
 
     for prohibited in (
         "StandardScaler",

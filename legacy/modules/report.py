@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from modules import data
+from legacy.modules import data
 
 
 def create_master_table(

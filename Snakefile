@@ -1,3 +1,2 @@
-configfile: "workflow_config.yaml"
-
-include: "workflow/rules/rnaseq.smk"
+# Compatibility entry point for the retained experimental workflow.
+include: "legacy/Snakefile"

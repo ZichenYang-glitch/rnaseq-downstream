@@ -271,14 +271,14 @@ def test_editable_install_resolves_to_current_checkout(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_legacy_checkout_resolves_flat_error_package_without_site_packages() -> None:
+def test_legacy_checkout_resolves_core_errors_without_site_packages() -> None:
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     source = (
         "import json, pathlib, sys, types; "
         "sys.modules.update({name: types.ModuleType(name) "
         "for name in ('pandas', 'yaml')}); "
-        "from modules import data; "
+        "from legacy.modules import data; "
         "import rnaseq_downstream.errors as errors; "
         "from rnaseq_downstream.errors import InputReadError; "
         "print(json.dumps({'same_type': data.InputReadError is InputReadError, "

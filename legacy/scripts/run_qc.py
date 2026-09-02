@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import os
 
-import config as cfg
-from modules import data, deseq
+from legacy import config as cfg
+from legacy.modules import data, deseq
 
 
 def main():

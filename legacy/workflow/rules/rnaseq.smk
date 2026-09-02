@@ -120,7 +120,7 @@ rule validate:
     conda:
         "../../environment.yaml"
     shell:
-        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_validate.py"
+        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python -m legacy.scripts.run_validate"
 
 
 rule qc:
@@ -134,7 +134,7 @@ rule qc:
     conda:
         "../../environment.yaml"
     shell:
-        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_qc.py"
+        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python -m legacy.scripts.run_qc"
 
 
 rule deseq:
@@ -153,7 +153,7 @@ rule deseq:
     conda:
         "../../environment.yaml"
     shell:
-        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_deseq.py"
+        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python -m legacy.scripts.run_deseq"
 
 
 rule gsea:
@@ -165,7 +165,7 @@ rule gsea:
     conda:
         "../../environment.yaml"
     shell:
-        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_gsea.py"
+        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python -m legacy.scripts.run_gsea"
 
 
 rule report:
@@ -186,4 +186,4 @@ rule report:
     conda:
         "../../environment.yaml"
     shell:
-        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python scripts/run_report.py"
+        "MPLCONFIGDIR=/tmp/mplconfig RNASEQ_CONFIG={workflow.configfiles[0]} python -m legacy.scripts.run_report"

@@ -3,8 +3,8 @@ import os
 
 import pandas as pd
 
-import config as cfg
-from modules import data
+from legacy import config as cfg
+from legacy.modules import data
 
 
 def main():

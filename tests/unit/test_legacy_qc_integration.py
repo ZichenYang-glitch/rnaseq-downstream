@@ -38,7 +38,7 @@ def _stub_module(name: str, *, package: bool = False) -> types.ModuleType:
 
 @pytest.fixture
 def legacy_deseq(monkeypatch: pytest.MonkeyPatch):
-    """Import modules/deseq.py while replacing unavailable plotting/DE packages."""
+    """Import legacy/modules/deseq.py with plotting/DE packages replaced."""
 
     pydeseq2 = _stub_module("pydeseq2", package=True)
     pydeseq2_dds = _stub_module("pydeseq2.dds")
@@ -69,7 +69,7 @@ def legacy_deseq(monkeypatch: pytest.MonkeyPatch):
 
     spec = importlib.util.spec_from_file_location(
         "checkpoint_a_legacy_deseq",
-        PROJECT_ROOT / "modules" / "deseq.py",
+        PROJECT_ROOT / "legacy" / "modules" / "deseq.py",
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

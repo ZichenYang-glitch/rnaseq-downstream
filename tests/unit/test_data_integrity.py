@@ -16,7 +16,7 @@ pytest.importorskip(
     reason="Importing the legacy data module requires the optional PyYAML runtime.",
 )
 
-from modules.data import (  # noqa: E402
+from legacy.modules.data import (  # noqa: E402
     load_annotation_table,
     load_counts,
     load_expression_matrix,

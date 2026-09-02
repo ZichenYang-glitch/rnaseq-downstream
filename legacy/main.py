@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
 import argparse
-import sys
 import os
-import matplotlib
-matplotlib.use('Agg') # Set non-interactive backend
-import config as cfg
+import sys
 
-# Import modules
-from modules import data, deseq, enrichment, report
 
 def main():
     parser = argparse.ArgumentParser(description="RNA-seq Downstream Analysis Pipeline")
@@ -19,6 +14,13 @@ def main():
         help="Analysis step to run.",
     )
     args = parser.parse_args()
+
+    import matplotlib
+
+    matplotlib.use('Agg')  # Set non-interactive backend
+
+    from legacy import config as cfg
+    from legacy.modules import data, deseq, enrichment, report
     
     print("=== RNA-seq Pipeline Started ===")
     

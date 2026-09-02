@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_MODULE = PROJECT_ROOT / "modules" / "data.py"
+DATA_MODULE = PROJECT_ROOT / "legacy" / "modules" / "data.py"
 DATA_SOURCE = DATA_MODULE.read_text(encoding="utf-8")
 DATA_TREE = ast.parse(DATA_SOURCE, filename=str(DATA_MODULE))
 LOADER_NAMES = {"load_metadata", "load_counts"}
@@ -86,7 +86,7 @@ _HAS_LEGACY_RUNTIME = all(
 )
 
 if _HAS_LEGACY_RUNTIME:
-    from modules.data import load_counts, load_metadata
+    from legacy.modules.data import load_counts, load_metadata
     from rnaseq_downstream.errors import ErrorCode, InputReadError
 
     @pytest.mark.unit

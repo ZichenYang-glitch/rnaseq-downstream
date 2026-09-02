@@ -3,8 +3,10 @@ import os
 
 import pandas as pd
 
-import config as cfg
-from modules import data, enrichment
+from legacy import config as cfg
+from legacy.modules import data
+
+from legacy.extras.homer.motif import run_motif_analysis
 
 
 def main():
@@ -18,12 +20,12 @@ def main():
             raise FileNotFoundError(f"Missing DESeq2 result: {path}")
         results[name] = pd.read_csv(path, index_col=0)
 
-    enrichment.run_gsea(
+    run_motif_analysis(
         results,
-        cfg.GSEA_GENE_SETS,
-        os.path.join(cfg.OUTPUT_DIR, '04_GSEA'),
-        cfg.GSEA_PERMUTATIONS,
-        cfg.GSEA_RANK_METRIC,
+        os.path.join(cfg.OUTPUT_DIR, '06_Motif'),
+        cfg.HOMER_SPECIES,
+        cfg.PADJ_THRESH,
+        cfg.LOGFC_THRESH,
     )
 
 

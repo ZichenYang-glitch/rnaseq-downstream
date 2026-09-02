@@ -41,7 +41,7 @@ def legacy_report(monkeypatch: pytest.MonkeyPatch):
 
     spec = importlib.util.spec_from_file_location(
         "checkpoint_a_legacy_report",
-        PROJECT_ROOT / "modules" / "report.py",
+        PROJECT_ROOT / "legacy" / "modules" / "report.py",
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -84,7 +84,10 @@ def test_master_table_preserves_count_gene_names_as_display_only(
 
 
 def test_both_legacy_report_callers_forward_embedded_count_annotations() -> None:
-    for path in (PROJECT_ROOT / "main.py", PROJECT_ROOT / "scripts" / "run_report.py"):
+    for path in (
+        PROJECT_ROOT / "legacy" / "main.py",
+        PROJECT_ROOT / "legacy" / "scripts" / "run_report.py",
+    ):
         source = path.read_text(encoding="utf-8")
         assert "return_gene_annotations=True" in source
         assert "count_annotation_df=count_annotation_df" in source
