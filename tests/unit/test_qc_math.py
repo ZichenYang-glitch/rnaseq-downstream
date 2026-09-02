@@ -397,6 +397,50 @@ def test_joint_design_rejects_nonfinite_numeric_factor() -> None:
     _assert_reason(exc_info, "nonfinite_factor")
 
 
+@pytest.mark.parametrize(
+    "missing_value",
+    [None, float("nan"), np.datetime64("NaT"), np.timedelta64("NaT"), np.ma.masked],
+)
+def test_joint_design_rejects_na_like_categorical_values_before_encoding(
+    missing_value: object,
+) -> None:
+    with pytest.raises(QCValidationError) as exc_info:
+        build_joint_design(
+            [FactorSpec("group", ["A", missing_value, "B", "B"], "categorical")],
+            [],
+        )
+
+    _assert_reason(exc_info, "missing_factor_value")
+
+
+@pytest.mark.parametrize("sentinel_name", ["NA", "NaT"])
+def test_joint_design_rejects_pandas_na_instead_of_encoding_ghost_level(
+    sentinel_name: str,
+) -> None:
+    pandas = pytest.importorskip("pandas")
+    missing_value = getattr(pandas, sentinel_name)
+
+    with pytest.raises(QCValidationError) as exc_info:
+        build_joint_design(
+            [FactorSpec("group", ["A", missing_value, "B", "B"], "categorical")],
+            [],
+        )
+
+    _assert_reason(exc_info, "missing_factor_value")
+
+
+def test_joint_design_rejects_pandas_na_in_numeric_factor_before_cast() -> None:
+    pandas = pytest.importorskip("pandas")
+
+    with pytest.raises(QCValidationError) as exc_info:
+        build_joint_design(
+            [FactorSpec("group", ["A", "A", "B", "B"], "categorical")],
+            [FactorSpec("age", [1.0, pandas.NA, 3.0, 4.0], "numeric")],
+        )
+
+    _assert_reason(exc_info, "nonfinite_factor")
+
+
 def test_joint_design_requires_positive_residual_df() -> None:
     with pytest.raises(CovariateConfoundedError) as exc_info:
         build_joint_design(

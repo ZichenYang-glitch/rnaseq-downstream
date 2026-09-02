@@ -277,6 +277,29 @@ def test_combined_featurecounts_validates_without_using_symbol_as_key(
     }
 
 
+def test_documented_limitation_self_attested_manifest_cannot_prove_origin(
+    tmp_path: Path,
+) -> None:
+    """A forged but self-consistent producer claim passes only the input gate."""
+
+    # These integer values could be rounded Salmon estimated counts. The
+    # validator has no authenticated producer record beyond the caller-supplied
+    # request and matching manifest, so their true origin is unknowable here.
+    request_path, _ = _featurecounts_combined(
+        tmp_path,
+        counts=(("10", "21"), ("30", "41")),
+    )
+
+    result = validate_request(request_path)
+
+    assert result["data"]["input_certification_eligible"] is True
+    assert result["data"]["certification_scope"] == "input_semantics_only"
+    assert result["data"]["producer"] == {
+        "name": "featureCounts",
+        "version": "2.0.6",
+    }
+
+
 def test_paths_are_relative_to_request_not_process_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -804,6 +827,24 @@ def test_full_length_zero_effective_length_has_offset_specific_error(
         validate_request(request_path)
 
 
+def test_full_length_malformed_quant_header_has_offset_specific_error(
+    tmp_path: Path,
+) -> None:
+    request_path, _ = _salmon_request(tmp_path)
+    quant_path = tmp_path / "salmon" / "s1" / "quant.sf"
+    text = quant_path.read_text(encoding="utf-8").replace(
+        "Name\tLength\tEffectiveLength\tTPM\tNumReads",
+        "Name\tLength\teffective_length\tTPM\tNumReads",
+    )
+    _write(quant_path, text)
+
+    with pytest.raises(SalmonOffsetRequiredError) as raised:
+        validate_request(request_path)
+
+    assert raised.value.code.value == "SALMON_OFFSET_REQUIRED"
+    assert raised.value.details["observed_header"][2] == "effective_length"
+
+
 def test_three_prime_zero_effective_length_does_not_create_an_offset_requirement(
     tmp_path: Path,
 ) -> None:
@@ -1059,6 +1100,50 @@ def test_three_prime_protocol_must_be_literal(tmp_path: Path) -> None:
     _rewrite_request(request_path, request)
 
     with pytest.raises(AssayProtocolRequiredError):
+        validate_request(request_path)
+
+
+def test_full_length_request_rejects_three_prime_protocol_route_confusion(
+    tmp_path: Path,
+) -> None:
+    request_path, request = _salmon_request(tmp_path)
+    request["assay_protocol"] = "three_prime"
+    _rewrite_request(request_path, request)
+
+    with pytest.raises(AssayProtocolRequiredError):
+        validate_request(request_path)
+
+
+def test_three_prime_request_rejects_full_length_protocol_route_confusion(
+    tmp_path: Path,
+) -> None:
+    request_path, request = _salmon_request(tmp_path, three_prime=True)
+    request["assay_protocol"] = "full_length"
+    _rewrite_request(request_path, request)
+
+    with pytest.raises(AssayProtocolRequiredError):
+        validate_request(request_path)
+
+
+def test_salmon_request_rejects_featurecounts_route_declaration(
+    tmp_path: Path,
+) -> None:
+    request_path, request = _salmon_request(tmp_path)
+    request["featurecounts"] = {"layout": "per_sample_files"}
+    _rewrite_request(request_path, request)
+
+    with pytest.raises(InvalidRequestError):
+        validate_request(request_path)
+
+
+def test_featurecounts_request_rejects_salmon_route_declaration(
+    tmp_path: Path,
+) -> None:
+    request_path, request = _featurecounts_combined(tmp_path)
+    request["salmon"] = {"tx2gene": "tx2gene.tsv"}
+    _rewrite_request(request_path, request)
+
+    with pytest.raises(InvalidRequestError):
         validate_request(request_path)
 
 

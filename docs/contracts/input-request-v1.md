@@ -194,6 +194,20 @@ producer and reference identities must agree. The actual matrix header must be
 exactly `gene_id_column`, then `display_columns`, then `sample_columns` in the
 declared order. The matrix digest must match the manifest.
 
+#### Trust boundary: manifest self-attestation
+
+The typed combined-matrix manifest is self-attested evidence supplied alongside
+the matrix. Validation proves that the request, manifest, matrix bytes, declared
+producer/version, reference, schema, and integer count domain are internally
+consistent. It does **not** cryptographically prove that featureCounts produced
+those bytes. In particular, a user could round a Salmon-derived merged matrix,
+declare it as `featurecounts_integer`, and create a matching manifest and
+digest; an internally consistent construction of that kind passes this
+input-only gate even though its producer claim is false. The validator cannot
+infer or authenticate producer origin from integer matrix contents. Users who
+need stronger origin evidence must retain original per-sample featureCounts
+files and external workflow provenance or use the `per_sample_files` layout.
+
 ### Original per-sample files
 
 The request adds `featurecounts.layout = "per_sample_files"`, and each sample

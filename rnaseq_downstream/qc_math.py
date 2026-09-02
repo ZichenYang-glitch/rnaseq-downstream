@@ -466,7 +466,10 @@ def _factor_matrix(
         _validation_error(
             "Factor names must be non-empty.", reason="missing_factor_name"
         )
-    values = np.asarray(spec.values)
+    # Use an object view for the boundary check so nullable scalar sentinels
+    # such as pandas.NA are not stringified into an apparently valid level by
+    # NumPy's common-dtype inference.
+    values = np.asarray(spec.values, dtype=object)
     if values.ndim != 1 or len(values) != sample_count:
         _validation_error(
             f"Factor '{name}' does not align with the samples.",
@@ -475,6 +478,17 @@ def _factor_matrix(
             factor_length=int(values.size),
             sample_count=int(sample_count),
         )
+
+    for value in values.tolist():
+        if _is_na_like(value):
+            reason = (
+                "nonfinite_factor" if spec.kind == "numeric" else "missing_factor_value"
+            )
+            _validation_error(
+                f"Factor '{name}' contains missing values.",
+                reason=reason,
+                factor=name,
+            )
 
     if spec.kind == "numeric":
         try:
@@ -511,12 +525,6 @@ def _factor_matrix(
 
     labels: list[str] = []
     for value in values.tolist():
-        if value is None:
-            _validation_error(
-                f"Categorical factor '{name}' contains missing values.",
-                reason="missing_factor_value",
-                factor=name,
-            )
         if isinstance(value, str) and not value.strip():
             _validation_error(
                 f"Categorical factor '{name}' contains blank values.",
@@ -577,6 +585,44 @@ def _factor_matrix(
             categorical_coding=categorical_coding,
         )
     return encoded, columns
+
+
+def _is_na_like(value: object) -> bool:
+    """Return true for scalar missing-value sentinels without importing pandas."""
+
+    if value is None or np.ma.is_masked(value):
+        return True
+
+    value_type = type(value)
+    if value_type.__module__.startswith("pandas.") and value_type.__name__ in {
+        "NAType",
+        "NaTType",
+    }:
+        return True
+
+    try:
+        scalar = np.asarray(value)
+    except (TypeError, ValueError):
+        return False
+    if scalar.ndim != 0:
+        return False
+    if scalar.dtype.kind in "fc":
+        return bool(np.isnan(scalar))
+    if scalar.dtype.kind in "mM":
+        return bool(np.isnat(scalar))
+    if scalar.dtype.kind != "O":
+        return False
+
+    # Decimal NaN and similar scalar sentinels are non-reflexive. Keep this
+    # deliberately scalar-only so array-valued objects are rejected by the
+    # ordinary factor-shape/value checks rather than treated as missing.
+    try:
+        unequal = value != value
+        if isinstance(unequal, (bool, np.bool_)):
+            return bool(unequal)
+    except (TypeError, ValueError):
+        return False
+    return False
 
 
 def _rank(matrix: np.ndarray) -> int:
