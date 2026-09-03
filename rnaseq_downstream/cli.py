@@ -192,7 +192,32 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
                 "combined_manifest_origin_authentication": ("self_attested_not_proven"),
                 "end_to_end_publication_grade_claim": False,
                 "publication_grade_claim": False,
-            }
+            },
+            {
+                "path_id": "edger_ql_p0_v1_limma_gene_sets_v1",
+                "parent_path_id": "edger_ql_p0_v1",
+                "maturity": "research_preview",
+                "execution_scope": "validated_p0_input",
+                "analysis_request_schema_version": "1.1",
+                "backend": "edgeR_QL_plus_limma_gene_set_tests",
+                "input_sources": "frozen_local_gmt_plus_annotation",
+                "self_contained": {
+                    "primary": "limma_fry",
+                    "corroborative": "limma_mroast",
+                },
+                "competitive": {"supplementary": "limma_camera"},
+                "multiple_testing": (
+                    "BH_within_contrast_method_and_hypothesis"
+                ),
+                "benchmark_evidence": [
+                    "airway-limma-gene-set-same-engine-v1",
+                    "compcoder-limma-self-contained-fdr-tpr-v1",
+                ],
+                "benchmark_scope": "backend_kernel_only",
+                "online_resources": False,
+                "end_to_end_publication_grade_claim": False,
+                "publication_grade_claim": False,
+            },
         ],
         "non_statistical_display_capabilities": [
             {
@@ -336,6 +361,16 @@ def _run(arguments: argparse.Namespace) -> _CommandResult:
         "display_export": backend_data.get("display_export"),
         "contrasts": backend_data.get("contrasts"),
     }
+    pathway_analysis = backend_data.get("pathway_analysis")
+    if pathway_analysis is not None:
+        if not isinstance(pathway_analysis, Mapping):
+            raise BackendFailedError(
+                "The edgeR adapter returned invalid pathway completion data."
+            )
+        data["scope"]["analysis_path"] = (
+            "edger_ql_p0_v1_limma_gene_sets_v1"
+        )
+        data["pathways"] = dict(pathway_analysis)
     return _CommandResult(
         data=data,
         warnings=tuple(completed.get("warnings", ())),

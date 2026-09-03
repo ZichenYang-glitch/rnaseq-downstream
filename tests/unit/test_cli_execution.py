@@ -22,13 +22,23 @@ from rnaseq_downstream.errors import (
 
 
 @pytest.mark.unit
-def test_capabilities_exposes_v11_display_without_changing_analysis_path() -> None:
+def test_capabilities_exposes_v11_display_and_gated_pathways() -> None:
     data = cli._capabilities(SimpleNamespace())
 
     assert data["analysis_request_schema_versions"] == ["1.0", "1.1"]
     assert [path["path_id"] for path in data["evidence_gated_analysis_paths"]] == [
-        "edger_ql_p0_v1"
+        "edger_ql_p0_v1",
+        "edger_ql_p0_v1_limma_gene_sets_v1",
     ]
+    pathway = data["evidence_gated_analysis_paths"][1]
+    assert pathway["parent_path_id"] == "edger_ql_p0_v1"
+    assert pathway["self_contained"] == {
+        "primary": "limma_fry",
+        "corroborative": "limma_mroast",
+    }
+    assert pathway["competitive"] == {"supplementary": "limma_camera"}
+    assert pathway["online_resources"] is False
+    assert pathway["publication_grade_claim"] is False
     assert data["certified_analysis_paths"] == []
     assert data["non_statistical_display_capabilities"] == [
         {
@@ -290,9 +300,56 @@ def test_run_forwards_backend_logs_to_stderr_and_returns_artifacts(
     assert envelope["data"]["ql_fit_parameters"]["abundance.trend"] is True
     assert envelope["data"]["ql_fit_parameters"]["winsor.tail.p"] == [0.05, 0.1]
     assert envelope["data"]["display_export"] is None
+    assert "pathways" not in envelope["data"]
     assert envelope["artifacts"][0]["role"] == "results"
     assert captured.out == ""
     assert captured.err == "edgeR diagnostic\n"
+
+
+@pytest.mark.unit
+def test_run_exposes_pathway_completion_only_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rnaseq_downstream import edger_backend
+
+    pathway_completion = {
+        "enabled": True,
+        "result_row_count": 15,
+        "gene_set_count": 3,
+        "methods": ["limma_mroast", "limma_fry", "limma_camera"],
+    }
+    monkeypatch.setattr(
+        edger_backend,
+        "run_edger_ql",
+        lambda *_args, **_kwargs: {
+            "status": "success",
+            "backend": "edgeR_QL",
+            "execution_scope": "validated_p0_input",
+            "output_dir": "/results",
+            "publication_status": "durability_confirmed",
+            "plan_id": "a" * 64,
+            "analysis_request_sha256": "b" * 64,
+            "data": {"pathway_analysis": pathway_completion},
+            "warnings": [],
+            "artifacts": [],
+            "backend_stderr": "",
+        },
+    )
+
+    result = cli._run(
+        SimpleNamespace(
+            request="request.json",
+            output_dir="results",
+            rscript="Rscript",
+            r_library=None,
+        )
+    )
+
+    assert result.data["pathways"] == pathway_completion
+    assert (
+        result.data["scope"]["analysis_path"]
+        == "edger_ql_p0_v1_limma_gene_sets_v1"
+    )
 
 
 @pytest.mark.unit

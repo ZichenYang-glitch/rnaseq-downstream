@@ -192,13 +192,27 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
     assert document["data"]["analysis_request_schema_versions"] == ["1.0", "1.1"]
     assert document["data"]["certified_analysis_paths"] == []
     paths = document["data"]["evidence_gated_analysis_paths"]
-    assert [path["path_id"] for path in paths] == ["edger_ql_p0_v1"]
+    assert [path["path_id"] for path in paths] == [
+        "edger_ql_p0_v1",
+        "edger_ql_p0_v1_limma_gene_sets_v1",
+    ]
     assert paths[0]["maturity"] == "research_preview"
     assert paths[0]["benchmark_scope"] == "backend_kernel_only"
     assert paths[0]["combined_manifest_origin_authentication"] == (
         "self_attested_not_proven"
     )
     assert paths[0]["publication_grade_claim"] is False
+    assert paths[1]["parent_path_id"] == "edger_ql_p0_v1"
+    assert paths[1]["self_contained"] == {
+        "primary": "limma_fry",
+        "corroborative": "limma_mroast",
+    }
+    assert paths[1]["competitive"] == {"supplementary": "limma_camera"}
+    assert paths[1]["benchmark_evidence"] == [
+        "airway-limma-gene-set-same-engine-v1",
+        "compcoder-limma-self-contained-fdr-tpr-v1",
+    ]
+    assert paths[1]["publication_grade_claim"] is False
     displays = document["data"]["non_statistical_display_capabilities"]
     assert [item["capability_id"] for item in displays] == [
         "edger_ql_p0_v1_static_svg_display_v1"
