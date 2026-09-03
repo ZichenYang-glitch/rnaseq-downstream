@@ -31,6 +31,9 @@ IMPLEMENTATION_PATHS = {
     "edger_backend.py": PROJECT_ROOT / "rnaseq_downstream/edger_backend.py",
     "analysis_contract.py": PROJECT_ROOT / "rnaseq_downstream/analysis_contract.py",
     "edger_ql.R": PROJECT_ROOT / "rnaseq_downstream/r_scripts/edger_ql.R",
+    "pathway_tests.R": (
+        PROJECT_ROOT / "rnaseq_downstream/r_scripts/pathway_tests.R"
+    ),
     "conda-lock.yml": PROJECT_ROOT / "conda-lock.yml",
     "renv.lock": PROJECT_ROOT / "renv.lock",
     "environment.p0.yml": PROJECT_ROOT / "environment.p0.yml",

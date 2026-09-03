@@ -62,7 +62,7 @@ jobs:
           Rscript --vanilla environment/verify.R
           --library "$RNASEQ_P0_R_LIBRARY"
 
-      - name: Run non-skippable P0 certification tests
+      - name: Run non-skippable P0 and C2 certification tests
         shell: bash -el {0}
         env:
           RNASEQ_P0_REQUIRE_BENCHMARKS: "1"
@@ -70,13 +70,20 @@ jobs:
         run: >-
           conda run --prefix "$P0_PREFIX" --no-capture-output
           python -m pytest
-          tests/unit tests/integration tests/oracle tests/simulation -v
+          tests/unit tests/integration
+          tests/oracle/test_benchmark_report_schema.py
+          tests/oracle/test_airway_oracle.py
+          tests/oracle/test_pathway_airway_oracle.py
+          tests/simulation/test_compcoder_gate.py
+          tests/simulation/test_pathway_compcoder_gate.py
+          -v
 
       - name: Archive machine-readable benchmark reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
+          # Includes the gene-level P0 and pathway-level C2 reports.
           name: p0-benchmark-reports
           path: benchmark-results/*.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 90

@@ -345,6 +345,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
     adapter_script = PROJECT_ROOT / "rnaseq_downstream/edger_backend.py"
     contract_script = PROJECT_ROOT / "rnaseq_downstream/analysis_contract.py"
     toolkit_script = PROJECT_ROOT / "rnaseq_downstream/r_scripts/edger_ql.R"
+    pathway_script = PROJECT_ROOT / "rnaseq_downstream/r_scripts/pathway_tests.R"
     airway_description = r_library / "airway/DESCRIPTION"
     environment_evidence = [
         PROJECT_ROOT / "conda-lock.yml",
@@ -362,6 +363,7 @@ def run(arguments: argparse.Namespace) -> dict[str, Any]:
         file_evidence(adapter_script),
         file_evidence(contract_script),
         file_evidence(toolkit_script),
+        file_evidence(pathway_script),
         *(file_evidence(path) for path in environment_evidence),
     ]
 

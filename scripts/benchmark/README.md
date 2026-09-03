@@ -1,17 +1,17 @@
-# P0 certification benchmark runners
+# Locked certification benchmark runners
 
-These runners create machine-readable evidence for the locked edgeR backend.
+These runners create machine-readable evidence for the locked edgeR/limma
+statistical backend.
 They are deliberately separate from the public CLI and must be run with the
 same P0 Conda prefix and R library as the toolkit backend.
 
-Both gates in this directory are **backend-kernel** gates. The locked `airway`
-object contains integer counts, but this repository does not claim that its
-packaged object is accompanied by the toolkit's required featureCounts origin
-evidence. The compcodeR matrices are synthetic negative-binomial counts, not
-featureCounts outputs. Consequently, neither benchmark fabricates a
-featureCounts manifest and neither report certifies the public input route.
-They enter the backend through a private benchmark adapter that is unreachable
-from the public CLI.
+All four gates in this directory are **backend-kernel** gates. The locked
+`airway` object contains integer counts, but this repository does not claim that
+its packaged object is accompanied by the toolkit's required featureCounts
+origin evidence. The compcodeR matrices are synthetic negative-binomial counts,
+not featureCounts outputs. Consequently, no benchmark fabricates a featureCounts
+manifest and no report certifies the public input route. They enter the backend
+through a private benchmark adapter that is unreachable from the public CLI.
 
 ## Airway same-engine oracle
 
@@ -70,18 +70,78 @@ as a descriptive metric and is not called or gated as FDR. The TPR limits are
 regression gates for this frozen scenario, not a universal biological power
 claim.
 
+## Airway edgeR/limma pathway same-engine oracle
+
+`run_airway_pathway_oracle.py` reuses the locked airway assay and paired
+`~ cell + dex` design. It creates a deterministic local GMT and one-to-one
+synthetic symbol annotation with four 50-gene tested sets plus below-minimum and
+unmapped controls. Some fixture sets are selected from crude group means to
+exercise method output; they are not curated pathways or independent truth.
+
+`run_airway_pathway_direct_oracle.R` is an independent literal implementation
+of the same DGEGLM dispatches used by the toolkit: one multi-set mroast call with
+9,999 rotations and seed 1729, fry, and camera with per-set inter-gene
+correlation estimation. The gate requires exact set/method/hypothesis and status
+grids, then compares P values, FDR, mroast proportions, camera raw/effective
+correlations, and VIF with `rtol=1e-6` and `atol=1e-10`. It independently
+recalculates BH in Python with absolute tolerance `1e-12`.
+
+This oracle detects integration and numerical drift between two independently
+written routes through the same locked edgeR/limma engine. It is not external
+validation of the methods' statistical assumptions.
+
+## compcodeR pathway-level gate
+
+`generate_pathway_compcoder_fixture.R` and
+`run_pathway_compcoder_gate.py` exercise the self-contained directional mroast
+and fry families. The runner creates 20 mixed and 40 complete-null fixtures,
+each with 5,000 genes and six samples per condition. Mixed fixtures contain 500
+true DE genes. Every fixture has 100 null sets (25 each of sizes 20, 40, 80, and
+160); mixed fixtures also have five 40-gene Up sets and five 40-gene Down sets.
+
+Set membership is generated from truth categories with a separate RNG stream:
+null sets sample truth-null genes without replacement within each set, while
+positive sets are disjoint within direction and contain only same-direction
+truth-DE genes. Membership never consults observed counts, fitted statistics,
+P values, or ranks. Null sets may overlap one another.
+
+At BH FDR 0.05, each of mroast and fry must meet all frozen limits:
+
+- mean mixed-scenario FDP at most 0.10;
+- worst mixed-scenario FDP at most 0.25;
+- mean mixed-scenario TPR at least 0.80;
+- worst mixed-scenario TPR at least 0.60;
+- zero wrong-direction significant positive sets;
+- no more than four family rejections across 40 complete-null replicates.
+
+The runner also independently verifies BH within every
+contrast/method/hypothesis family to absolute tolerance `1e-12`. These limits
+were frozen after a disclosed exploratory design pilot. The finite scenarios
+are a gross-regression check, not universal evidence of pathway-level FDR
+control or biological power. The fixed mroast seed is shared across replicates,
+which can induce Monte Carlo dependence and further limits that inference.
+Camera is excluded from this self-contained FDR/TPR gate and is covered by the
+airway pathway oracle instead.
+
 ## Reports
 
-After their declared runtime and report destination can be opened, both runners
-write a strict JSON report conforming to `benchmark-report-v1.schema.json` for
-either a passing gate or an execution/gate failure. Argument-parsing and
-unreadable-runtime failures can occur before a report can be initialized. The
-report records runtime versions, exact input hashes, thresholds, metrics, and
-each gate decision. Its implementation inventory also binds the Conda lock,
-renv lock, primary R source lock, top-level environment specification, and
-runtime verifier by SHA-256. Reports contain no NaN or Infinity values. A
-report with `status: "pass"` is evidence only for its named benchmark and
-locked runtime.
+After their declared runtime and report destination can be opened, all four
+runners write a strict JSON report conforming to
+`benchmark-report-v1.schema.json` for either a passing gate or an execution/gate
+failure. Argument-parsing and unreadable-runtime failures can occur before a
+report can be initialized. The report records runtime versions, exact input
+hashes, thresholds, metrics, and each gate decision. Its implementation
+inventory also binds the Conda lock, renv lock, primary R source lock, top-level
+environment specification, and runtime verifier by SHA-256. Reports contain no
+NaN or Infinity values. A report with `status: "pass"` is evidence only for its
+named benchmark and locked runtime.
+
+The checked-in report names are:
+
+- `tests/oracle/airway-benchmark-report.json`;
+- `tests/oracle/pathway-airway-benchmark-report.json`;
+- `tests/simulation/compcoder-benchmark-report.json`;
+- `tests/simulation/pathway-compcoder-benchmark-report.json`.
 
 The pytest modules under `tests/oracle` and `tests/simulation` invoke these
 runners when `RNASEQ_P0_R_LIBRARY` points at the restored locked library. If the
@@ -90,4 +150,7 @@ gates. Certification CI must set `RNASEQ_P0_REQUIRE_BENCHMARKS=1` as well as
 the library variable; in that mode a missing runtime is a test failure and the
 gate cannot silently skip. When `RNASEQ_P0_BENCHMARK_REPORT_DIR` is set, each
 live test writes its deterministic report filename into that non-symlink
-directory so CI can archive reports even when a gate fails.
+directory so CI can archive reports even when a gate fails. The locked GitHub
+Actions job makes all four gates non-skippable and uploads
+`benchmark-results/*.json` as the `p0-benchmark-reports` artifact for 90 days,
+including on failed jobs.
