@@ -136,6 +136,7 @@ def _analysis_request(
     weights: dict[str, float],
     schema_version: str = "1.0",
     display: object | None = None,
+    gene_sets: object | None = None,
 ) -> Path:
     document: dict[str, object] = {
         "schema_version": schema_version,
@@ -160,6 +161,8 @@ def _analysis_request(
     }
     if display is not None:
         document["display"] = display
+    if gene_sets is not None:
+        document["gene_sets"] = gene_sets
     return _write_json(root / "analysis.json", document)
 
 
@@ -207,6 +210,7 @@ def test_analysis_request_v11_accepts_explicit_display_without_changing_backend_
         "pca_top_n": 500,
         "pca_components": [1, 2],
     }
+    assert validated.gene_sets is None
     backend_document = validated.to_backend_document()
     assert backend_document["schema_version"] == "1.0"
     assert "display" not in backend_document
@@ -232,6 +236,72 @@ def test_analysis_request_v10_stays_strict_and_rejects_display(
 
     assert caught.value.details["context"] == "analysis request"
     assert caught.value.details["unknown_keys"] == ["display"]
+
+
+def test_analysis_request_v11_accepts_optional_frozen_gene_set_sources(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    gmt = _write(tmp_path / "sets.gmt", "SET_A\tdescription\tA\tB\n")
+    annotation = _write(
+        tmp_path / "annotation.tsv",
+        "gene_id\tsymbol\nENSG1\tA\nENSG2\tB\n",
+    )
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.1",
+        display={
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+        gene_sets={
+            "gmt": {
+                "path": gmt.name,
+                "sha256": _sha256(gmt),
+                "collection": "synthetic_hallmarks",
+                "version": "2026.1",
+                "identifier_type": "symbol",
+            },
+            "annotation": {
+                "path": annotation.name,
+                "sha256": _sha256(annotation),
+                "name": "synthetic_ensembl",
+                "version": "1",
+                "gene_id_column": "gene_id",
+                "symbol_column": "symbol",
+            },
+            "minimum_tested_genes": 2,
+        },
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.gene_sets is not None
+    assert validated.gene_sets["gmt"]["path"] == str(gmt.resolve())
+    assert validated.gene_sets["gmt"]["declared_path"] == gmt.name
+    assert validated.gene_sets["annotation"]["path"] == str(annotation.resolve())
+    backend_document = validated.to_backend_document()
+    assert backend_document["gene_sets"] == validated.gene_sets
+    assert backend_document["gene_sets"] is not validated.gene_sets
+
+
+def test_analysis_request_v10_rejects_gene_sets(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        gene_sets={},
+    )
+
+    with pytest.raises(InvalidRequestError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["context"] == "analysis request"
+    assert caught.value.details["unknown_keys"] == ["gene_sets"]
 
 
 def test_analysis_request_v11_requires_display(tmp_path: Path) -> None:

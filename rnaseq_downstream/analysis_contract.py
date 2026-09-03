@@ -8,6 +8,7 @@ process can be started.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import hashlib
 import math
@@ -21,6 +22,7 @@ from .errors import (
     InputReadError,
     InvalidRequestError,
 )
+from .gene_sets import parse_gene_sets_request
 from .provenance import (
     has_control_characters,
     read_json_object,
@@ -118,11 +120,12 @@ class ValidatedAnalysisRequest:
     design: dict[str, Any]
     contrasts: tuple[dict[str, Any], ...]
     display: dict[str, Any] | None
+    gene_sets: dict[str, Any] | None
 
     def to_backend_document(self) -> dict[str, Any]:
         """Return the JSON payload completed later with private input snapshots."""
 
-        return {
+        document = {
             "schema_version": ANALYSIS_SCHEMA_VERSION,
             "kind": "edger_ql_backend_request",
             "analysis_request": {
@@ -138,6 +141,9 @@ class ValidatedAnalysisRequest:
             "design": dict(self.design),
             "contrasts": [dict(item) for item in self.contrasts],
         }
+        if self.gene_sets is not None:
+            document["gene_sets"] = copy.deepcopy(self.gene_sets)
+        return document
 
 
 def _capture(path: Path) -> tuple[bytes, str, int]:
@@ -928,14 +934,20 @@ def load_analysis_request(path: str | Path) -> ValidatedAnalysisRequest:
             context="analysis request",
         )
         display = None
+        gene_sets = None
     else:
         require_expected_keys(
             document,
-            allowed=base_keys | {"display"},
+            allowed=base_keys | {"display", "gene_sets"},
             required=base_keys | {"display"},
             context="analysis request version 1.1",
         )
         display = _parse_display(document["display"])
+        gene_sets = (
+            parse_gene_sets_request(document["gene_sets"], request_path=request_path)
+            if "gene_sets" in document
+            else None
+        )
     bundle_path = _resolve_bundle(
         document["validated_input_bundle"], request_path=request_path
     )
@@ -957,6 +969,7 @@ def load_analysis_request(path: str | Path) -> ValidatedAnalysisRequest:
         design=_parse_design(document["design"]),
         contrasts=_parse_contrasts(document["contrasts"]),
         display=display,
+        gene_sets=gene_sets,
     )
 
 
