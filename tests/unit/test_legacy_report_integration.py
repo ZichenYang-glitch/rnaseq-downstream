@@ -91,3 +91,37 @@ def test_both_legacy_report_callers_forward_embedded_count_annotations() -> None
         source = path.read_text(encoding="utf-8")
         assert "return_gene_annotations=True" in source
         assert "count_annotation_df=count_annotation_df" in source
+
+
+def test_contrast_report_omits_retired_motif_card(
+    legacy_report,
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "output"
+    report_dir = output_dir / "05_Summary"
+    (output_dir / "06_Motif" / "treated_vs_control").mkdir(parents=True)
+    (output_dir / "04_GSEA" / "treated_vs_control" / "Hallmark").mkdir(
+        parents=True
+    )
+    results = {
+        "treated_vs_control": pd.DataFrame(
+            {
+                "log2FoldChange": [2.0, -1.0],
+                "padj": [0.01, 0.2],
+                "pvalue": [0.001, 0.1],
+                "stat": [4.0, -1.5],
+            },
+            index=["ENSG1", "ENSG2"],
+        )
+    }
+
+    legacy_report.create_contrast_report_pages(output_dir, report_dir, results)
+
+    html = (report_dir / "contrast_treated_vs_control.html").read_text(
+        encoding="utf-8"
+    )
+    assert "GSEA Outputs" in html
+    assert "Hallmark" in html
+    assert "Motif Outputs" not in html
+    assert "Open motif results" not in html
+    assert "06_Motif" not in html

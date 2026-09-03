@@ -620,7 +620,6 @@ def create_contrast_report_pages(output_dir, out_dir, results_dict):
         ma_path = os.path.join(output_dir, "03_Volcano_Plots", f"MA_{name}.png")
         stat_path = os.path.join(output_dir, "02_DESeq2_Stats", f"{name}.csv")
         gsea_dirs = sorted(glob.glob(os.path.join(output_dir, "04_GSEA", name, "*")))
-        motif_dir = os.path.join(output_dir, "06_Motif", name)
 
         clean = df.dropna(subset=['padj', 'log2FoldChange']).copy()
         top = clean.assign(
@@ -646,11 +645,6 @@ def create_contrast_report_pages(output_dir, out_dir, results_dict):
         gsea_links = "".join(
             f'<li><a href="{rel(path)}">{os.path.basename(path)}</a></li>' for path in gsea_dirs
         ) or "<li>No GSEA directory found.</li>"
-        motif_html = (
-            f'<p><a href="{rel(motif_dir)}">Open motif results</a></p>'
-            if os.path.exists(motif_dir)
-            else "<p>No motif results found.</p>"
-        )
 
         html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -690,15 +684,9 @@ def create_contrast_report_pages(output_dir, out_dir, results_dict):
     {table_html}
   </div>
 
-  <div class="grid" style="margin-top: 1rem;">
-    <div class="card">
-      <h2>GSEA Outputs</h2>
-      <ul>{gsea_links}</ul>
-    </div>
-    <div class="card">
-      <h2>Motif Outputs</h2>
-      {motif_html}
-    </div>
+  <div class="card" style="margin-top: 1rem;">
+    <h2>GSEA Outputs</h2>
+    <ul>{gsea_links}</ul>
   </div>
 </body>
 </html>
