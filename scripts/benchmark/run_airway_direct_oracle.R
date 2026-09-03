@@ -61,7 +61,16 @@ y <- DGEList(counts = count_matrix)
 keep <- filterByExpr(y, design = design)
 y <- y[keep, , keep.lib.sizes = FALSE]
 y <- normLibSizes(y)
-fit <- glmQLFit(y, design, legacy = FALSE, robust = TRUE)
+fit <- glmQLFit(
+  y,
+  design,
+  abundance.trend = TRUE,
+  robust = TRUE,
+  winsor.tail.p = c(0.05, 0.1),
+  legacy = FALSE,
+  top.proportion = NULL,
+  keep.unit.mat = FALSE
+)
 test <- glmQLFTest(fit, coef = "dextrt")
 table <- topTags(test, n = Inf, sort.by = "none")$table
 

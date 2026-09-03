@@ -95,6 +95,49 @@ def _private_kernel(
     )
 
 
+def _numeric_result_parity(
+    oracle_results: dict[str, dict[str, str]],
+    toolkit_tested: dict[str, dict[str, str]],
+    *,
+    oracle_field: str,
+    toolkit_field: str,
+) -> dict[str, int | float]:
+    """Compare one tested-result field after the gene-set gate succeeds."""
+
+    violations = 0
+    maximum_absolute = 0.0
+    maximum_relative = 0.0
+    value_count = 0
+    if set(oracle_results) == set(toolkit_tested):
+        for gene_id, oracle_row in oracle_results.items():
+            expected = finite_float(
+                oracle_row[oracle_field], field=oracle_field, gene_id=gene_id
+            )
+            observed = finite_float(
+                toolkit_tested[gene_id][toolkit_field],
+                field=toolkit_field,
+                gene_id=gene_id,
+            )
+            difference = abs(observed - expected)
+            relative = difference / max(abs(expected), 1e-300)
+            maximum_absolute = max(maximum_absolute, difference)
+            maximum_relative = max(maximum_relative, relative)
+            value_count += 1
+            if not math.isclose(
+                observed,
+                expected,
+                rel_tol=RELATIVE_TOLERANCE,
+                abs_tol=ABSOLUTE_TOLERANCE,
+            ):
+                violations += 1
+    return {
+        "value_count": value_count,
+        "violations": violations,
+        "max_absolute_difference": maximum_absolute,
+        "max_relative_difference": maximum_relative,
+    }
+
+
 def _comparison(
     oracle_directory: Path,
     toolkit_directory: Path,
@@ -184,26 +227,32 @@ def _comparison(
                 ):
                     coefficient_violations += 1
 
-    logfc_violations = 0
-    logfc_max_absolute = 0.0
-    logfc_max_relative = 0.0
-    if gene_sets_equal:
-        for gene_id, oracle_row in oracle_results.items():
-            expected = finite_float(oracle_row["logFC"], field="logFC", gene_id=gene_id)
-            observed = finite_float(
-                toolkit_tested[gene_id]["logFC"], field="logFC", gene_id=gene_id
-            )
-            difference = abs(observed - expected)
-            relative = difference / max(abs(expected), 1e-300)
-            logfc_max_absolute = max(logfc_max_absolute, difference)
-            logfc_max_relative = max(logfc_max_relative, relative)
-            if not math.isclose(
-                observed,
-                expected,
-                rel_tol=RELATIVE_TOLERANCE,
-                abs_tol=ABSOLUTE_TOLERANCE,
-            ):
-                logfc_violations += 1
+    numeric_parity = {
+        "logfc": _numeric_result_parity(
+            oracle_results,
+            toolkit_tested,
+            oracle_field="logFC",
+            toolkit_field="logFC",
+        ),
+        "pvalue": _numeric_result_parity(
+            oracle_results,
+            toolkit_tested,
+            oracle_field="PValue",
+            toolkit_field="PValue",
+        ),
+        "f_statistic": _numeric_result_parity(
+            oracle_results,
+            toolkit_tested,
+            oracle_field="F",
+            toolkit_field="statistic",
+        ),
+        "fdr": _numeric_result_parity(
+            oracle_results,
+            toolkit_tested,
+            oracle_field="FDR",
+            toolkit_field="FDR",
+        ),
+    }
 
     assertions: list[dict[str, object]] = [
         {
@@ -229,7 +278,11 @@ def _comparison(
         },
         {
             "name": "coefficient_numeric_parity",
-            "passed": coefficient_violations == 0,
+            "passed": (
+                coefficient_columns_equal
+                and coefficient_gene_sets_equal
+                and coefficient_violations == 0
+            ),
             "observed": {
                 "violations": coefficient_violations,
                 "max_absolute_difference": coefficient_max_absolute,
@@ -239,13 +292,29 @@ def _comparison(
         },
         {
             "name": "logfc_numeric_parity",
-            "passed": logfc_violations == 0,
-            "observed": {
-                "violations": logfc_violations,
-                "max_absolute_difference": logfc_max_absolute,
-                "max_relative_difference": logfc_max_relative,
-            },
+            "passed": gene_sets_equal and numeric_parity["logfc"]["violations"] == 0,
+            "observed": numeric_parity["logfc"],
             "requirement": "all tested logFC values satisfy rtol=1e-6 and atol=1e-10",
+        },
+        {
+            "name": "pvalue_numeric_parity",
+            "passed": (gene_sets_equal and numeric_parity["pvalue"]["violations"] == 0),
+            "observed": numeric_parity["pvalue"],
+            "requirement": "all tested PValue values satisfy rtol=1e-6 and atol=1e-10",
+        },
+        {
+            "name": "f_statistic_numeric_parity",
+            "passed": (
+                gene_sets_equal and numeric_parity["f_statistic"]["violations"] == 0
+            ),
+            "observed": numeric_parity["f_statistic"],
+            "requirement": "all tested F statistics satisfy rtol=1e-6 and atol=1e-10",
+        },
+        {
+            "name": "fdr_numeric_parity",
+            "passed": gene_sets_equal and numeric_parity["fdr"]["violations"] == 0,
+            "observed": numeric_parity["fdr"],
+            "requirement": "all tested FDR values satisfy rtol=1e-6 and atol=1e-10",
         },
     ]
     metrics: dict[str, object] = {
@@ -256,8 +325,11 @@ def _comparison(
         "coefficient_value_count": len(toolkit_coefficients),
         "coefficient_max_absolute_difference": coefficient_max_absolute,
         "coefficient_max_relative_difference": coefficient_max_relative,
-        "logfc_max_absolute_difference": logfc_max_absolute,
-        "logfc_max_relative_difference": logfc_max_relative,
+        **{
+            f"{name}_{metric}": value
+            for name, comparison in numeric_parity.items()
+            for metric, value in comparison.items()
+        },
     }
     return assertions, metrics
 

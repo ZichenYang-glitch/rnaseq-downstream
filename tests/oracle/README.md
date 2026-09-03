@@ -6,7 +6,8 @@ This directory contains the same-engine backend-kernel oracle required by P0:
   run in the same locked environment;
 - airway is extracted from the locked data package at runtime and both routes
   consume those exact bytes;
-- coefficients and log fold changes must meet the declared `rtol=1e-6` gate;
+- coefficients, log fold changes, quasi-likelihood F statistics, raw P values,
+  and BH FDR values must meet the declared `rtol=1e-6`, `atol=1e-10` gate;
 - the comparison must write a machine-readable benchmark report.
 
 There are no checked-in expected coefficient values. The direct R script is an

@@ -28,8 +28,10 @@ glmQLFTest(coef="dextrt")
 
 The Python runner compares the direct output with the toolkit backend output.
 The tested gene set and coefficient columns must be identical. Every fitted
-coefficient and `logFC` must satisfy `math.isclose` with `rel_tol=1e-6` and
-`abs_tol=1e-10`. No checked-in expected coefficients are used, so the oracle
+coefficient, `logFC`, quasi-likelihood `F` statistic, raw `PValue`, and BH
+`FDR` must satisfy `math.isclose` with `rel_tol=1e-6` and `abs_tol=1e-10`.
+Each result field has an independent assertion and difference metrics in the
+machine-readable report. No checked-in expected values are used, so the oracle
 cannot pass merely by copying a frozen expected-value file.
 
 ## compcodeR negative-binomial gate
