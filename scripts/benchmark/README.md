@@ -143,6 +143,12 @@ The checked-in report names are:
 - `tests/simulation/compcoder-benchmark-report.json`;
 - `tests/simulation/pathway-compcoder-benchmark-report.json`.
 
+The C2 pathway simulation also has a
+[human-readable scope report](../../tests/simulation/pathway-compcoder-benchmark-report.md)
+covering its independent-gene model and the binomial operating characteristics
+of the complete-null cutoff. It is interpretation documentation; the adjacent
+JSON remains the authoritative runner-generated evidence.
+
 The pytest modules under `tests/oracle` and `tests/simulation` invoke these
 runners when `RNASEQ_P0_R_LIBRARY` points at the restored locked library. If the
 variable is absent, ordinary developer test runs skip the expensive locked
