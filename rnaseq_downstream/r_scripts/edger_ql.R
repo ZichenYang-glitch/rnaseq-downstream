@@ -118,7 +118,8 @@ assert_request_envelope <- function(request) {
             )
         )
     }
-    expected_schema <- if ("gene_sets" %in% observed) "1.1" else "1.0"
+    has_gene_sets <- "gene_sets" %in% observed
+    expected_schema <- if (has_gene_sets) "1.1" else "1.0"
     if (!identical(request$schema_version, expected_schema) ||
         !identical(request$kind, "edger_ql_backend_request") ||
         !is.character(request$execution_scope) ||
@@ -131,6 +132,17 @@ assert_request_envelope <- function(request) {
         )
     }
     ACTIVE_SCHEMA_VERSION <<- expected_schema
+    if (has_gene_sets && (is.null(request$gene_sets) ||
+        !is.list(request$gene_sets) || is.null(names(request$gene_sets)))) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "A schema 1.1 backend request requires a non-null gene_sets object.",
+            list(
+                reason = "backend_request_schema_invalid",
+                field = "gene_sets"
+            )
+        )
+    }
     invisible(request)
 }
 
@@ -1349,7 +1361,7 @@ run_analysis <- function(request_path, output_dir) {
     runtime <- assert_runtime()
     request <- read_request(request_path)
     assert_request_envelope(request)
-    output_schema_version <- if (is.null(request$gene_sets)) "1.0" else "1.1"
+    output_schema_version <- ACTIVE_SCHEMA_VERSION
     design_info <- build_design(request)
     contrasts <- build_contrasts(request, design_info)
     constructed <- construct_dge(request$input)
@@ -1410,7 +1422,7 @@ run_analysis <- function(request_path, output_dir) {
         estimability_residual = contrast$estimability_residual,
         estimability_tolerance = contrast$estimability_tolerance
     ))
-    pathway <- if (is.null(request$gene_sets)) {
+    pathway <- if (identical(output_schema_version, "1.0")) {
         NULL
     } else {
         run_pathway_tests(

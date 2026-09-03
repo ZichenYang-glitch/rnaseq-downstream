@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import csv
 import hashlib
 import io
@@ -13,7 +14,7 @@ import pytest
 
 from rnaseq_downstream import display_bundle
 from rnaseq_downstream.errors import InputIntegrityError
-from rnaseq_downstream.run_summary import summarize_run
+from rnaseq_downstream.run_summary import _verify_pathway_analysis, summarize_run
 
 RUNTIME = {
     "R": "4.6.1",
@@ -263,16 +264,24 @@ def _pathway_analysis(sets: list[dict[str, Any]]) -> dict[str, Any]:
             {
                 "contrast_id": "treated_vs_control",
                 "gene_level_lfc_threshold": 0,
-                "pathway_statistical_null": "zero_effect",
+                "self_contained_statistical_null": "zero_effect",
                 "gene_level_lfc_threshold_applied_to_pathways": False,
                 "ordered_set_lists": {
                     "self_contained": {
                         "gene_set_ids": ["set_a", "set_b"],
                         "sha256": "1" * 64,
+                        "verification_scope": (
+                            "backend_execution_evidence_syntax_and_"
+                            "cross_contrast_consistency_only"
+                        ),
                     },
                     "competitive": {
                         "gene_set_ids": ["set_a", "set_b"],
                         "sha256": "2" * 64,
+                        "verification_scope": (
+                            "backend_execution_evidence_syntax_and_"
+                            "cross_contrast_consistency_only"
+                        ),
                     },
                 },
                 "rotation": {
@@ -736,6 +745,40 @@ def test_pathway_summary_rejects_mapping_arithmetic_tampering(tmp_path: Path) ->
 
 
 @pytest.mark.unit
+def test_pathway_summary_requires_one_gene_id_per_unique_mapped_symbol() -> None:
+    sets = [
+        _set_record(
+            "set_a",
+            "Set A",
+            raw=3,
+            mapped_symbols=3,
+            unmapped_symbols=0,
+            mapped_genes=3,
+            tested=2,
+            filtered=1,
+        ),
+        _set_record(
+            "set_b",
+            "Set B",
+            raw=2,
+            mapped_symbols=2,
+            unmapped_symbols=0,
+            mapped_genes=2,
+            tested=2,
+            filtered=0,
+        ),
+    ]
+    analysis = _analysis(sets)
+    set_a = analysis["pathway_analysis"]["gene_sets"]["sets"][0]
+    set_a["mapped_gene_id_count_unique"] = 2
+    set_a["filtered_gene_count"] = 0
+    set_a["absent_from_assay_gene_count"] = 0
+
+    with pytest.raises(InputIntegrityError, match="mapping counts"):
+        _verify_pathway_analysis(analysis, analysis["contrasts"])
+
+
+@pytest.mark.unit
 def test_pathway_summary_cross_checks_frozen_source_snapshot_identity(
     tmp_path: Path,
 ) -> None:
@@ -838,3 +881,61 @@ def test_pathway_summary_rejects_inconsistent_mroast_proportions(
 
     with pytest.raises(InputIntegrityError, match="rotation proportions"):
         summarize_run(run_dir)
+
+
+@pytest.mark.unit
+def test_pathway_summary_rejects_mroast_active_proportions_above_one(
+    tmp_path: Path,
+) -> None:
+    run_dir = _bundle(tmp_path)
+    _mutate_pathway_cell(
+        run_dir,
+        gene_set_id="set_a",
+        method_id="limma_mroast",
+        hypothesis="directional",
+        field="proportion_down",
+        value="0.75",
+    )
+
+    with pytest.raises(InputIntegrityError, match="sum to more than one"):
+        summarize_run(run_dir)
+
+
+@pytest.mark.unit
+def test_pathway_summary_rejects_membership_digest_changes_across_contrasts() -> None:
+    sets = [
+        _set_record(
+            "set_a",
+            "Set A",
+            raw=2,
+            mapped_symbols=2,
+            unmapped_symbols=0,
+            mapped_genes=2,
+            tested=2,
+            filtered=0,
+        ),
+        _set_record(
+            "set_b",
+            "Set B",
+            raw=2,
+            mapped_symbols=2,
+            unmapped_symbols=0,
+            mapped_genes=2,
+            tested=2,
+            filtered=0,
+        ),
+    ]
+    analysis = _analysis(sets)
+    second_contrast = copy.deepcopy(analysis["contrasts"][0])
+    second_contrast["contrast_id"] = "second_contrast"
+    analysis["contrasts"].append(second_contrast)
+    second_pathway = copy.deepcopy(
+        analysis["pathway_analysis"]["contrasts"][0]
+    )
+    second_pathway["contrast_id"] = "second_contrast"
+    second_pathway["rotation"]["seed"] = 1730
+    second_pathway["ordered_set_lists"]["self_contained"]["sha256"] = "9" * 64
+    analysis["pathway_analysis"]["contrasts"].append(second_pathway)
+
+    with pytest.raises(InputIntegrityError, match="changes across contrasts"):
+        _verify_pathway_analysis(analysis, analysis["contrasts"])

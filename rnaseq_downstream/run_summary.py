@@ -449,7 +449,12 @@ def _tsv_rows(
     try:
         text = content.decode("utf-8")
         rows = list(
-            csv.reader(io.StringIO(text, newline=""), delimiter="\t", strict=True)
+            csv.reader(
+                io.StringIO(text, newline=""),
+                delimiter="\t",
+                quoting=csv.QUOTE_NONE,
+                strict=True,
+            )
         )
     except (UnicodeError, csv.Error) as error:
         raise _integrity(
@@ -1350,7 +1355,7 @@ def _verify_pathway_analysis(
             + counts["filtered_gene_count"]
             + counts["absent_from_assay_gene_count"]
             or counts["mapped_gene_id_count_unique"]
-            > counts["mapped_symbol_count_unique"]
+            != counts["mapped_symbol_count_unique"]
             or counts["tested_gene_count"] > tested_universe
             or counts["filtered_gene_count"] > analysis["genes"]["filtered"]
             or mapping_rate > 1
@@ -1489,6 +1494,7 @@ def _verify_pathway_analysis(
         and item["tested_gene_count"] >= 2
         and item["tested_gene_count"] < tested_universe
     ]
+    ordered_membership_digests: dict[str, str] = {}
     for index, (item, contrast) in enumerate(
         zip(pathway_contrasts, contrasts, strict=True)
     ):
@@ -1501,7 +1507,7 @@ def _verify_pathway_analysis(
             {
                 "contrast_id",
                 "gene_level_lfc_threshold",
-                "pathway_statistical_null",
+                "self_contained_statistical_null",
                 "gene_level_lfc_threshold_applied_to_pathways",
                 "ordered_set_lists",
                 "rotation",
@@ -1516,7 +1522,7 @@ def _verify_pathway_analysis(
         if (
             item["contrast_id"] != contrast["contrast_id"]
             or threshold != contrast["lfc_threshold"]
-            or item["pathway_statistical_null"] != "zero_effect"
+            or item["self_contained_statistical_null"] != "zero_effect"
             or item["gene_level_lfc_threshold_applied_to_pathways"] is not False
         ):
             raise _integrity(
@@ -1538,7 +1544,7 @@ def _verify_pathway_analysis(
                 raise _integrity("A pathway ordered-set record is invalid.")
             _exact_keys(
                 record,
-                {"gene_set_ids", "sha256"},
+                {"gene_set_ids", "sha256", "verification_scope"},
                 context=f"{test_class} ordered set list",
             )
             observed_ids = (
@@ -1554,9 +1560,27 @@ def _verify_pathway_analysis(
                     test_class=test_class,
                     contrast_id=contrast["contrast_id"],
                 )
-            _pathway_json_digest(
+            digest = _pathway_json_digest(
                 record["sha256"], context=f"{test_class} ordered-set digest"
             )
+            if record["verification_scope"] != (
+                "backend_execution_evidence_syntax_and_"
+                "cross_contrast_consistency_only"
+            ):
+                raise _integrity(
+                    "A pathway ordered-set digest overstates its verification scope.",
+                    test_class=test_class,
+                    contrast_id=contrast["contrast_id"],
+                )
+            previous_digest = ordered_membership_digests.setdefault(
+                test_class, digest
+            )
+            if previous_digest != digest:
+                raise _integrity(
+                    "A pathway ordered-set membership digest changes across contrasts.",
+                    test_class=test_class,
+                    contrast_id=contrast["contrast_id"],
+                )
         rotation = item["rotation"]
         expected_rotation = {
             "method_id": "limma_mroast",
@@ -1875,6 +1899,11 @@ def _verify_pathway_results(
             proportion_up = _pathway_probability(
                 values["proportion_up"], row=row_number, field="proportion_up"
             )
+            if proportion_down + proportion_up > 1 + 1e-12:
+                raise _integrity(
+                    "The mroast active proportions sum to more than one.",
+                    row=row_number,
+                )
             proportion_key = (contrast_id, gene_set_id)
             proportions = (proportion_down, proportion_up)
             previous_proportions = mroast_proportions.setdefault(

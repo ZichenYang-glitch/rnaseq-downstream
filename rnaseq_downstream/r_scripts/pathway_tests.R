@@ -542,19 +542,28 @@ pathway_assert_method_table <- function(table, index, columns, method_id) {
 
 pathway_verify_bh <- function(table, p_column, fdr_column, method_id, hypothesis) {
     expected <- stats::p.adjust(table[[p_column]], method = "BH")
-    observed <- table[[fdr_column]]
-    difference <- if (length(expected) == 0L) 0 else max(abs(expected - observed))
-    if (!is.finite(difference) || difference > 1e-12) {
-        backend_abort(
-            "BACKEND_FAILED",
-            "A limma pathway FDR column disagrees with an independent BH calculation.",
-            list(
-                reason = "pathway_fdr_mismatch",
-                method_id = method_id,
-                hypothesis = hypothesis,
-                maximum_absolute_difference = difference
+    if (fdr_column %in% colnames(table)) {
+        observed <- table[[fdr_column]]
+        difference <- if (length(expected) == 0L) {
+            0
+        } else {
+            max(abs(expected - observed))
+        }
+        if (!is.finite(difference) || difference > 1e-12) {
+            backend_abort(
+                "BACKEND_FAILED",
+                paste(
+                    "A limma pathway FDR column disagrees with an",
+                    "independent BH calculation."
+                ),
+                list(
+                    reason = "pathway_fdr_mismatch",
+                    method_id = method_id,
+                    hypothesis = hypothesis,
+                    maximum_absolute_difference = difference
+                )
             )
-        )
+        }
     }
     expected
 }
@@ -721,7 +730,7 @@ pathway_run_methods <- function(fit, design, contrast, mapped_sets, minimum, see
             self_index,
             c(
                 "NGenes", "PropDown", "PropUp", "Direction", "PValue",
-                "FDR", "PValue.Mixed", "FDR.Mixed"
+                "PValue.Mixed"
             ),
             "limma_mroast"
         )
@@ -744,8 +753,7 @@ pathway_run_methods <- function(fit, design, contrast, mapped_sets, minimum, see
             fry_table,
             self_index,
             c(
-                "NGenes", "Direction", "PValue", "FDR", "PValue.Mixed",
-                "FDR.Mixed"
+                "NGenes", "Direction", "PValue", "PValue.Mixed"
             ),
             "limma_fry"
         )
@@ -771,7 +779,7 @@ pathway_run_methods <- function(fit, design, contrast, mapped_sets, minimum, see
         pathway_assert_method_table(
             camera_table,
             camera_index,
-            c("NGenes", "Correlation", "Direction", "PValue", "FDR"),
+            c("NGenes", "Correlation", "Direction", "PValue"),
             "limma_camera"
         )
         camera_table$FDR <- pathway_verify_bh(
@@ -810,16 +818,24 @@ pathway_run_methods <- function(fit, design, contrast, mapped_sets, minimum, see
         provenance = list(
             contrast_id = contrast$contrast_id,
             gene_level_lfc_threshold = contrast$lfc_threshold,
-            pathway_statistical_null = "zero_effect",
+            self_contained_statistical_null = "zero_effect",
             gene_level_lfc_threshold_applied_to_pathways = FALSE,
             ordered_set_lists = list(
                 self_contained = list(
                     gene_set_ids = as.list(names(self_index)),
-                    sha256 = pathway_ordered_set_hash(self_index, tested_gene_ids)
+                    sha256 = pathway_ordered_set_hash(self_index, tested_gene_ids),
+                    verification_scope = paste0(
+                        "backend_execution_evidence_syntax_and_",
+                        "cross_contrast_consistency_only"
+                    )
                 ),
                 competitive = list(
                     gene_set_ids = as.list(names(camera_index)),
-                    sha256 = pathway_ordered_set_hash(camera_index, tested_gene_ids)
+                    sha256 = pathway_ordered_set_hash(camera_index, tested_gene_ids),
+                    verification_scope = paste0(
+                        "backend_execution_evidence_syntax_and_",
+                        "cross_contrast_consistency_only"
+                    )
                 )
             ),
             rotation = list(

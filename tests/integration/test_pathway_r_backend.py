@@ -365,8 +365,14 @@ def test_pathway_backend_uses_one_fit_and_emits_audited_long_results(
     )
     contrast = pathways["contrasts"][0]
     assert contrast["gene_level_lfc_threshold"] == 0.5
-    assert contrast["pathway_statistical_null"] == "zero_effect"
+    assert contrast["self_contained_statistical_null"] == "zero_effect"
     assert contrast["gene_level_lfc_threshold_applied_to_pathways"] is False
+    assert {
+        record["verification_scope"]
+        for record in contrast["ordered_set_lists"].values()
+    } == {
+        "backend_execution_evidence_syntax_and_cross_contrast_consistency_only"
+    }
     assert contrast["rotation"] == {
         "method_id": "limma_mroast",
         "seed": 1729,
@@ -386,6 +392,35 @@ def test_pathway_backend_uses_one_fit_and_emits_audited_long_results(
     assert (repeated_output / "pathway_results.tsv").read_bytes() == (
         output / "pathway_results.tsv"
     ).read_bytes()
+
+
+def test_pathway_backend_constructs_bh_for_exactly_one_eligible_set(
+    tmp_path: Path,
+) -> None:
+    request = _fixture(tmp_path / "single-set")
+    _replace_source(
+        request,
+        "gmt",
+        "SET_ONLY\tone eligible set\t"
+        + "\t".join(f"S{index}" for index in range(31, 41))
+        + "\n",
+    )
+    output = tmp_path / "single-set" / "output"
+
+    completed = _invoke(request, output)
+
+    assert completed.returncode == 0, completed.stderr
+    rows = _read_tsv(output / "pathway_results.tsv")
+    assert len(rows) == 5
+    assert {row["gene_set_id"] for row in rows} == {"SET_ONLY"}
+    assert {row["status"] for row in rows} == {"tested"}
+    assert {row["method_id"] for row in rows} == {
+        "limma_mroast",
+        "limma_fry",
+        "limma_camera",
+    }
+    for row in rows:
+        assert float(row["fdr"]) == pytest.approx(float(row["p_value"]))
 
 
 def test_pathway_backend_hard_fails_duplicate_gmt_member_without_outputs(
@@ -455,6 +490,31 @@ def test_pathway_backend_requires_schema_11_exactly_when_gene_sets_are_present(
     assert not output.exists()
 
 
+def test_pathway_backend_rejects_null_gene_sets_in_schema_11(
+    tmp_path: Path,
+) -> None:
+    request = _fixture(tmp_path / "null-gene-sets")
+    document = json.loads(request.read_text(encoding="utf-8"))
+    document["gene_sets"] = None
+    request.write_text(
+        json.dumps(document, allow_nan=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "null-gene-sets" / "must-not-exist"
+
+    completed = _invoke(request, output)
+
+    assert completed.returncode == 4
+    response = json.loads(completed.stdout)
+    assert response["schema_version"] == "1.1"
+    assert response["status"] == "error"
+    assert response["errors"][0]["details"] == {
+        "reason": "backend_request_schema_invalid",
+        "field": "gene_sets",
+    }
+    assert not output.exists()
+
+
 def test_public_pathway_run_is_recaptured_verified_and_published_atomically(
     tmp_path: Path,
 ) -> None:
@@ -478,7 +538,7 @@ def test_public_pathway_run_is_recaptured_verified_and_published_atomically(
     )
     gmt = _write(
         root / "sets.gmt",
-        "SET_DE\tfixture DE genes\t"
+        'SET_DE\t"fixture DE genes"\t'
         + "\t".join(f"S{index}" for index in range(1, 9))
         + "\nSET_NULL\tfixture null genes\t"
         + "\t".join(f"S{index}" for index in range(21, 31))
