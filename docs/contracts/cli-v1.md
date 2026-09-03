@@ -89,6 +89,15 @@ extension documented here.
   public input routes are covered separately by the validation contract and
   locked integration tests. Machine fields state that combined-manifest origin
   is self-attested rather than authenticated.
+
+  `analysis_request_schema_versions` lists the accepted public analysis
+  request versions. `non_statistical_display_capabilities` describes the
+  optional version 1.1 static-SVG sidecar without adding another analysis path.
+  Its record fixes the compatible path and request version, plot inventory,
+  output location, PCA input/scaling, locked-runtime determinism scope, and
+  `summarize` verification mode. `statistical_role:
+  "display_only_no_inference"` and `publication_grade_claim: false` are
+  normative boundaries, not marketing labels.
 - `inspect --request REQUEST.json` resolves, fingerprints, and structurally
   inspects one declared input request without writing files. Because full count
   numeric-domain validation is intentionally not run, its scope says
@@ -102,14 +111,19 @@ extension documented here.
 - `run --request ANALYSIS_REQUEST.json --output-dir DIRECTORY [--rscript
   EXECUTABLE] [--r-library DIRECTORY]` verifies an eligible validation bundle,
   runs the locked edgeR QL backend in an independent non-interactive R process,
-  and atomically publishes a five-file result bundle. It never overwrites an
-  existing output directory. Backend diagnostics captured by the adapter are
-  forwarded to stderr; the CLI still writes exactly one JSON document to
-  stdout.
+  and atomically publishes five core result files. A version 1.1 request also
+  publishes the requested `display/` sidecar in that same atomic operation. It
+  never overwrites an existing output directory. Backend diagnostics captured
+  by the adapter are forwarded to stderr; the CLI still writes exactly one JSON
+  document to stdout.
+  The success data includes `ql_fit_parameters` with the explicitly supplied
+  `glmQLFit` arguments and resolved `top.proportion`, plus `display_export`
+  provenance (or JSON `null` for a version 1.0 run).
 - `summarize --run-dir DIRECTORY` independently verifies a public result
-  bundle and returns per-contrast status and FDR-at-0.05 counts. It rejects
-  incomplete, modified, schema-incompatible, wrong-runtime, and private
-  `backend_kernel_only` output.
+  bundle and returns per-contrast status and FDR-at-0.05 counts. When a display
+  sidecar is present, it also verifies its inventory, source binding, PCA
+  coordinates, and reproducible SVG bytes. It rejects incomplete, modified,
+  schema-incompatible, wrong-runtime, and private `backend_kernel_only` output.
 - `--help` and subcommand help return their text inside a successful JSON
   envelope. Parser failures return `INVALID_REQUEST` with exit code 2; argparse
   never writes usage text directly to standard output.
@@ -172,12 +186,15 @@ completion.
 
 ## Result evidence and summary
 
-`run` publishes exactly `analysis.json`, `backend_manifest.json`,
-`coefficients.tsv`, `design.tsv`, and `results.tsv`. The backend manifest binds
-the other four members by relative name, SHA-256 digest, and byte size. The run
-response returns all five generated artifacts with canonical paths and
-digests. If the bundle is visible but parent-directory synchronization fails,
-the command succeeds only with the high-severity warning
+`run` always publishes the five core regular files `analysis.json`,
+`backend_manifest.json`, `coefficients.tsv`, `design.tsv`, and `results.tsv`.
+The backend manifest binds the other four core members by relative name,
+SHA-256 digest, and byte size. A version 1.1 analysis request additionally
+publishes `display/`, whose independent manifest binds its configuration, the
+five-file source bundle, and every display member. The run response returns all
+generated artifacts with canonical paths and digests. If the bundle is visible
+but parent-directory synchronization fails, the command succeeds only with the
+high-severity warning
 `OUTPUT_DURABILITY_UNCONFIRMED` and
 `publication_status: "published_durability_unconfirmed"`.
 
@@ -191,9 +208,19 @@ complete gene inventory, and checks tested/non-tested numeric rules. A tested
 Within each contrast, `summarize` also recomputes the Benjamini-Hochberg
 adjustment from all tested `PValue` entries and rejects any mismatched `FDR`.
 
-The summary returns all five files as `consumed_analysis_artifact` records and
-a compact contrast array containing `status_counts` and
-`significance_counts` (`fdr_le_0_05`, `fdr_gt_0_05`, and `not_tested`).
+The summary returns all five core files as `consumed_analysis_artifact` records
+and a compact contrast array containing `status_counts` and
+`significance_counts` (`fdr_le_0_05`, `fdr_gt_0_05`, and `not_tested`). If a
+display sidecar is present, verified members are additionally returned as
+`consumed_display_artifact` records with a display summary. A version 1.0
+five-file directory remains valid without `display/`.
+
+For compatibility, the unchanged five-file core does not record whether a
+display was requested. `summarize` therefore verifies a display when present
+but cannot distinguish a genuine version 1.0 core from a version 1.1 bundle
+after the whole `display/` directory has been removed. Consumers that must
+detect that omission must retain and verify the version 1.1 request and the
+successful `run` receipt, whose artifact inventory includes the display.
 
 ## Evidence boundary
 

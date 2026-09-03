@@ -18,11 +18,12 @@ python -m pip install --no-deps --no-build-isolation -e .
 python -m pytest tests/unit tests/integration -v
 ```
 
-The P0 Python lock intentionally has no NumPy, Pandas, PyDESeq2, or plotting
-stack. Tests that directly cover the retained experimental data/QC code use
-explicit `importorskip` boundaries and must be reported separately with their
-Python/scientific-package versions. A larger pass count in that host lane is
-expected and is not certification evidence.
+The locked Python layer includes NumPy 2.4.4 for the C1 display-only PCA path.
+It intentionally has no Pandas, PyDESeq2, or plotting stack. Tests that directly
+cover retained experimental code with optional dependencies use explicit
+`importorskip` boundaries and must be reported separately with their package
+versions. A larger pass count in that host lane is expected and is not
+certification evidence.
 
 The archived oracle and simulation report tests run even without R. They verify
 that each report says `pass`, that every named assertion passed, that the report

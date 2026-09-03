@@ -27,6 +27,8 @@ machine-verifiable results through a JSON-only command-line interface.
   design, contrast, and backend failures publish no partial bundle.
 - Stable JSON responses and error codes suitable for shell automation and
   general-purpose coding agents.
+- Optional, deterministic SVG volcano, MA, and sample-PCA displays generated
+  by the same analysis run and independently checked by `summarize`.
 - Locked runtime, same-engine oracle parity, and negative-binomial simulation
   regression gates.
 
@@ -102,9 +104,9 @@ Every command writes one JSON response to stdout, sends diagnostics to stderr,
 never prompts, and returns a non-zero exit code with stable structured errors
 when it cannot complete safely.
 
-## Results
+## Results and optional displays
 
-A successful analysis publishes exactly five files:
+A successful analysis always publishes five core regular files:
 
 | File | Contents |
 | --- | --- |
@@ -114,9 +116,25 @@ A successful analysis publishes exactly five files:
 | `coefficients.tsv` | Fitted coefficients and per-gene status |
 | `results.tsv` | Per-gene, per-contrast effect, P value, FDR, method, status, and reported statistic or explicit not-reported state |
 
-`summarize` verifies the inventory, hashes, schemas, runtime identity, row
-completeness, status vocabulary, and numeric invariants before reporting result
-counts.
+[Analysis request version 1.1](docs/contracts/analysis-request-v1.md) also adds
+a separately manifested `display/` directory in the same atomic publication.
+It contains one FDR volcano plot and one MA plot per contrast, plus one sample
+PCA plot. The PCA uses edgeR logCPM values after filtering and TMM
+normalization, selects up to the requested number of positive-variance genes,
+centers them, and does not scale each gene to unit variance. SVG is the only
+display format in version 1.1.
+
+The FDR threshold controls point highlighting only. These displays do not
+filter result rows, change differential-expression calls, remove batch effects,
+or feed values back into the edgeR analysis.
+
+`summarize` verifies the core inventory, hashes, schemas, runtime identity, row
+completeness, status vocabulary, and numeric invariants. When `display/` is
+present, it additionally verifies the display manifest and reproduces the
+source-derived coordinates and SVG content. Existing version 1.0 five-file
+directories remain supported. Because the core schemas intentionally contain
+no display-presence marker, retain the version 1.1 request and `run` receipt if
+you need to detect removal of the entire optional display directory.
 
 ## Current scope
 

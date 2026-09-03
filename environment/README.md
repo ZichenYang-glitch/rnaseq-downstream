@@ -9,7 +9,9 @@ The lock is currently limited to `linux-64` (x86-64 Linux):
 
 1. `environment.p0.yml` is the human-reviewed top-level Conda specification.
 2. `conda-lock.yml` pins the complete Python, R 4.6.1, compiler, and system
-   dependency closure, including package URLs and hashes.
+dependency closure, including package URLs and hashes.
+   NumPy 2.4.4 is part of this locked layer for the optional C1 PCA display;
+   differential-expression inference remains in R.
 3. `renv.lock` pins the complete R/Bioconductor 3.23 package closure.
 4. `environment/r-sources.lock` pins source URLs and SHA-256 digests for the
    bootstrap packages and the five primary P0 R packages.
