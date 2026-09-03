@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,27 @@ def _request(root: Path) -> tuple[Path, dict[str, object]]:
         },
         "minimum_tested_genes": 2,
     }
+
+
+def test_v11_pathway_example_binds_the_bundled_frozen_sources() -> None:
+    example_root = Path(__file__).parents[2] / "examples" / "analysis-requests"
+    request_path = example_root / "v1.1-pathways.request.json"
+    document = json.loads(request_path.read_text(encoding="utf-8"))
+
+    assert document["schema_version"] == "1.1"
+    assert set(document) == {
+        "schema_version",
+        "validated_input_bundle",
+        "design",
+        "contrasts",
+        "display",
+        "gene_sets",
+    }
+    gene_sets = document["gene_sets"]
+    for role in ("gmt", "annotation"):
+        source = example_root / gene_sets[role]["path"]
+        assert source.is_file()
+        assert gene_sets[role]["sha256"] == _sha256(source)
 
 
 def test_gene_sets_sources_are_resolved_and_captured_from_declared_bytes(

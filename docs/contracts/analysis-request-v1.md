@@ -4,13 +4,15 @@ An analysis request connects one completed, eligible input-validation bundle to
 the locked edgeR v4 quasi-likelihood backend. Both versions are strict JSON;
 additional fields are rejected rather than ignored. Version 1.0 retains its
 original four-field schema and has no display request. Version 1.1 requires one
-additional `display` object for deterministic post-result SVG output.
+additional `display` object for deterministic post-result SVG output and may
+also declare one optional `gene_sets` object for frozen local gene-set tests.
 
 The display request does not change input construction, filtering,
 normalization, model fitting, contrasts, P values, or multiple-testing
-adjustment. The internal R backend protocol remains version 1.0. Display
-artifacts are evidence-bound presentation outputs, not an additional
-statistical backend or certification claim.
+adjustment. The private R protocol and statistical result schema remain 1.0
+when `gene_sets` is absent; a gene-set request selects private schema 1.1 and
+adds one manifested inference table. Display artifacts are evidence-bound
+presentation outputs, not an additional statistical backend.
 
 ## Version 1.0 request
 
@@ -47,9 +49,9 @@ statistical backend or certification claim.
 }
 ```
 
-Supplying `display` with `schema_version: "1.0"` is an error. Existing version
-1.0 requests continue to publish and summarize the original five-file result
-directory without a `display/` subdirectory.
+Supplying `display` or `gene_sets` with `schema_version: "1.0"` is an error.
+Existing version 1.0 requests continue to publish and summarize the original
+five-file result directory without a `display/` subdirectory.
 
 ## Version 1.1 display request
 
@@ -125,8 +127,9 @@ as provenance. Before the same atomic `run` publication, version 1.1 adds a
 SVG members. The display manifest binds the normalized display request, core
 source digests, renderer and PCA method identities, per-plot source mappings,
 included/excluded row counts, relative member paths, byte sizes, and SHA-256
-digests. A requested display failure publishes neither the core directory nor
-a partial display directory. `summarize` accepts the original version 1.0
+digests. Publication is deliberately atomic: a requested display failure,
+including an invalid PCA component, publishes neither the statistically valid
+core nor a partial display directory. `summarize` accepts the original version 1.0
 five-file inventory and verifies the additional display inventory when it is
 present.
 
@@ -145,6 +148,94 @@ display manifest. The historical version 1.0 core schema remains unchanged and
 therefore carries only its original partial pipeline record; its remaining
 defaults are recoverable from the exact locked edgeR identity, not from new
 fields retrofitted into old core artifacts.
+
+## Optional version 1.1 gene-set request
+
+Version 1.1 may add this exact object alongside the required `display` object:
+
+```json
+{
+  "gene_sets": {
+    "gmt": {
+      "path": "gene-sets/h.all.v2026.1.symbols.gmt",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "collection": "MSigDB Hallmark",
+      "version": "2026.1",
+      "identifier_type": "symbol"
+    },
+    "annotation": {
+      "path": "annotation/symbol-to-ensembl.tsv",
+      "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      "name": "reviewed symbol-to-Ensembl map",
+      "version": "2026-08-01",
+      "gene_id_column": "gene_id",
+      "symbol_column": "symbol"
+    },
+    "minimum_tested_genes": 10
+  }
+}
+```
+
+Both source paths must resolve to non-symlink local regular files relative to
+the analysis request. URLs and online library names are rejected. Each source
+is captured as UTF-8 bytes and must match its declared lowercase SHA-256. At
+execution, the same source is captured again while being copied into the
+private R workspace; R reads only that private copy. `collection`, `name`, and
+both versions are provenance labels supplied by the user, while the digest is
+the byte identity the toolkit can verify. The toolkit does not download or
+authenticate MSigDB or another provider.
+
+The GMT must contain one unique set ID, one non-empty description, and at least
+one symbol per tab-delimited row. Duplicate set IDs, duplicate symbols within a
+set, empty fields, and control characters hard-fail the run. The annotation is
+a two-column TSV with the exact header `gene_id<TAB>symbol`. Annotation gene
+IDs use the same version-stripping policy as the assay and must remain unique
+after that policy. A symbol assigned to more than one gene ID is classified as
+ambiguous and excluded; it is never expanded silently. Each set records raw and
+unique GMT counts, uniquely mapped, ambiguous and unmapped symbol counts,
+mapping rate, mapped stable-ID count, post-`filterByExpr` tested count, filtered
+count, and count absent from the assay. Mapping rate is uniquely mapped unique
+symbols divided by unique GMT symbols.
+
+The backend also records an ordered-membership digest for each test class.
+Because the published result bundle binds but does not copy the full GMT and
+annotation sources, this digest is execution evidence rather than a
+reconstructable mapping proof. `summarize` checks its syntax, eligible set-ID
+order, and equality across contrasts; it cannot recompute the member-level
+digest from the published bundle alone. Retain the exact digest-bound GMT and
+annotation files for a complete mapping audit.
+
+Sets with fewer than `minimum_tested_genes` in the exact post-filter tested
+universe remain in `pathway_results.tsv` with `status: not_tested` and a stable
+reason. They are not silently dropped or replenished after filtering. A camera
+set also remains `not_tested` when it has fewer than two tested genes or covers
+the entire tested universe, because a competitive comparison then has no valid
+correlation estimate or complement.
+
+All methods consume the same `DGEGLM` returned by the run's single
+`glmQLFit`; no logCPM matrix or separately refitted model enters inference:
+
+- `limma::fry` is the primary self-contained count-data test and reports
+  directional and mixed hypotheses;
+- `limma::mroast` is a corroborative self-contained test with mean set
+  statistic, 9,999 rotations, `midp=false`, fixed RNG kind and seed, and
+  directional and mixed hypotheses; and
+- `limma::camera` is a supplementary competitive test. It estimates
+  inter-gene correlation separately for each set with
+  `inter.gene.cor=NA`, reports the raw estimate, and records the non-negative
+  effective correlation and variance-inflation factor used under
+  `allow.neg.cor=false`.
+
+Self-contained and competitive tests answer different questions and are never
+combined into one significance list. `fry` and `mroast` test a zero-effect
+gene-set null; camera tests enrichment relative to the complement. The
+gene-level `lfc_threshold` used by `glmTreat` is not applied to any gene-set
+test. For every tested family, BH adjustment is performed separately within
+`contrast_id × method_id × hypothesis`. `summarize` independently recomputes
+each family from raw P values and rejects pooled or altered FDR values.
+
+See [`examples/analysis-requests/v1.1-pathways.request.json`](../../examples/analysis-requests/v1.1-pathways.request.json)
+for a complete schema example with local synthetic assets.
 
 Relative `validated_input_bundle` paths are resolved from the analysis request,
 not from the process working directory. `run` verifies the bundle manifest,
@@ -234,7 +325,9 @@ The three accepted input semantics keep their checkpoint-A meanings:
 
 A successful `run` always atomically publishes these five core regular files
 and never overwrites an existing directory. Version 1.1 additionally publishes
-the independently manifested `display/` subdirectory described above:
+the independently manifested `display/` subdirectory described above. When
+`gene_sets` is requested, schema 1.1 also adds `pathway_results.tsv` as a sixth
+root inference artifact and requires the display directory to remain present:
 
 - `analysis.json`: normalized scientific provenance, runtime identity, observed
   input route, design lint evidence, contrasts, pipeline, and gene counts;
@@ -243,7 +336,11 @@ the independently manifested `display/` subdirectory described above:
 - `design.tsv`: `sample_id`, `coefficient`, `value` in long form;
 - `coefficients.tsv`: `gene_id`, `status`, `coefficient`, `estimate`, `scale` in
   long form; and
-- `results.tsv`: one row for every stable `gene_id` and contrast.
+- `results.tsv`: one row for every stable `gene_id` and contrast; and
+- `pathway_results.tsv`: one row for every declared contrast, gene set,
+  method, and applicable directional or mixed hypothesis, including explicit
+  mapping, eligibility, method, correlation/rotation, P-value, FDR, and status
+  fields.
 
 `results.tsv` uses this exact header:
 
@@ -251,8 +348,15 @@ the independently manifested `display/` subdirectory described above:
 gene_id  contrast_id  status  logFC  unshrunk_logFC  logCPM  statistic  statistic_type  statistic_status  PValue  FDR  test_method  lfc_threshold
 ```
 
-The separators are tabs. `logFC` is log2; fitted coefficients are natural-log
-scale. FDR is Benjamini-Hochberg within each contrast. The status vocabulary is
+When present, `pathway_results.tsv` uses this exact header:
+
+```text
+contrast_id  gene_set_id  gene_set_description  method_id  test_class  hypothesis  inference_role  status  status_reason  direction  proportion_down  proportion_up  p_value  fdr  fdr_family_id  gmt_member_count_raw  gmt_symbol_count_unique  mapped_symbol_count_unique  ambiguous_symbol_count_unique  unmapped_symbol_count_unique  mapping_rate  mapped_gene_id_count_unique  tested_gene_count  filtered_gene_count  tested_universe_gene_count  method_ngenes  correlation_status  correlation_estimate_raw  correlation_effective  vif_used  rotation_status
+```
+
+The separators in both headers are tabs. `logFC` is log2; fitted coefficients
+are natural-log scale. Gene-level FDR is Benjamini-Hochberg within each
+contrast. The status vocabulary is
 `filtered`, `not_tested`, `not_estimable`, `failed`, and `tested`; empty numeric
 fields are interpreted only together with that explicit status. The current
 fail-closed backend publishes complete successful runs with `filtered` or

@@ -13,8 +13,9 @@ machine-verifiable results through a JSON-only command-line interface.
 
 - Explicit input semantics: origin and count meaning are never guessed from a
   filename, file extension, or numeric type.
-- Stable `gene_id` keys throughout the statistical path; symbols are display
-  annotations only.
+- Stable `gene_id` keys throughout the statistical path; assay symbols are
+  display annotations only, while GMT symbols enter pathway tests only through
+  the declared frozen symbol-to-`gene_id` map.
 - Strict handling with no silent sample intersection, missing-value filling,
   count rounding, or gene-symbol aggregation.
 - SHA-256-bound input validation and provenance bundles.
@@ -29,6 +30,9 @@ machine-verifiable results through a JSON-only command-line interface.
   general-purpose coding agents.
 - Optional, deterministic SVG volcano, MA, and sample-PCA displays generated
   by the same analysis run and independently checked by `summarize`.
+- Optional frozen local GMT analysis on the same fitted model: `limma::fry`
+  and `limma::mroast` for self-contained tests, plus separately reported
+  `limma::camera` competitive tests with mapping audits.
 - Locked runtime, same-engine oracle parity, and negative-binomial simulation
   regression gates.
 
@@ -48,6 +52,8 @@ route.
 Bare merged Salmon gene-count matrices are rejected because they cannot show
 whether a transcript-length offset is required. Request templates are under
 [`examples/input-requests/`](examples/input-requests/).
+The complete version 1.1 analysis-request shape is under
+[`examples/analysis-requests/`](examples/analysis-requests/).
 
 ## Analysis path
 
@@ -60,6 +66,7 @@ declared input
   → TMM normalization
   → glmQLFit
   → glmQLFTest or glmTreat
+  → optional fry / mroast / camera gene-set tests
   → published result bundle
   → summarize and verify
 ```
@@ -104,7 +111,7 @@ Every command writes one JSON response to stdout, sends diagnostics to stderr,
 never prompts, and returns a non-zero exit code with stable structured errors
 when it cannot complete safely.
 
-## Results and optional displays
+## Results, pathways, and optional displays
 
 A successful analysis always publishes five core regular files:
 
@@ -124,6 +131,13 @@ normalization, selects up to the requested number of positive-variance genes,
 centers them, and does not scale each gene to unit variance. SVG is the only
 display format in version 1.1.
 
+When a version 1.1 request includes frozen local `gene_sets`, the same atomic
+run also publishes `pathway_results.tsv`. Every declared set is retained with
+its symbol-to-`gene_id` mapping rate and tested-universe size. Sets ineligible
+for a declared test are marked `not_tested` with a reason. Self-contained fry/mroast results
+and competitive camera results stay separate, and `summarize` independently
+checks their distinct BH correction families.
+
 The FDR threshold controls point highlighting only. These displays do not
 filter result rows, change differential-expression calls, remove batch effects,
 or feed values back into the edgeR analysis.
@@ -138,15 +152,19 @@ you need to detect removal of the entire optional display directory.
 
 ## Current scope
 
-The locked airway and compcodeR benchmarks cover the shared edgeR backend
-kernel; integration tests separately cover the public input routes. They do
-not authenticate producer origin or validate every possible study design. A
-combined featureCounts manifest is self-attested: the toolkit verifies and
-binds its declared bytes, but cannot prove who produced them.
+The locked airway and compcodeR benchmarks cover the shared edgeR kernel and
+the optional limma gene-set extension; integration tests separately cover the
+public input routes. The C2 compcodeR gate evaluates the self-contained fry and
+mroast tests; camera currently has same-engine airway parity rather than a
+simulation FDR/TPR gate. These checks do not authenticate producer origin or
+validate every possible study design. A combined featureCounts manifest is
+self-attested: the toolkit verifies and binds its declared bytes, but cannot
+prove who produced them.
 
-Interactions, splines, random effects, repeated-measure models, DTU, network
-analysis, activity inference, and additional differential-expression backends
-are outside P0. The retained PyDESeq2/GSEAPy/Snakemake workflow is
+Interactions, splines, random effects, repeated-measure models, GSEA/fgsea,
+DTU, network analysis, activity inference, and additional differential-
+expression backends are outside the evidence-gated path. The retained
+PyDESeq2/GSEAPy/Snakemake workflow is
 [experimental](legacy/README.md) and is not part of the evidence-gated path.
 
 For schemas, runtime setup, benchmark methods, and development information,

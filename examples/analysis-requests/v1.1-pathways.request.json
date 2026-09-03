@@ -1,0 +1,46 @@
+{
+  "schema_version": "1.1",
+  "validated_input_bundle": "../../evidence/example-validation-bundle",
+  "design": {
+    "intercept": true,
+    "terms": ["condition"],
+    "variables": {
+      "condition": {
+        "type": "factor",
+        "levels": ["control", "treated"]
+      }
+    }
+  },
+  "contrasts": [
+    {
+      "contrast_id": "treated_vs_control",
+      "weights": {
+        "conditiontreated": 1
+      },
+      "lfc_threshold": 0
+    }
+  ],
+  "display": {
+    "fdr_threshold": 0.05,
+    "pca_top_n": 500,
+    "pca_components": [1, 2]
+  },
+  "gene_sets": {
+    "gmt": {
+      "path": "assets/example-pathways.gmt",
+      "sha256": "531d4fc8cc86e884f7ed6ef36564833637b15b58a6cd05746cef76554a3add6f",
+      "collection": "illustrative-local-gmt",
+      "version": "1",
+      "identifier_type": "symbol"
+    },
+    "annotation": {
+      "path": "assets/example-symbol-to-gene-id.tsv",
+      "sha256": "a44bd1c662ad4f6d4511c6663f92dce6bcc7ad0c1e1a19756842b78b0a0b23e3",
+      "name": "illustrative-symbol-map",
+      "version": "1",
+      "gene_id_column": "gene_id",
+      "symbol_column": "symbol"
+    },
+    "minimum_tested_genes": 10
+  }
+}

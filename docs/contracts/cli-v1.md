@@ -84,7 +84,8 @@ extension documented here.
 ## Commands
 
 - `capabilities` returns the implemented surfaces and the exact scope of the
-  evidence-gated `edger_ql_p0_v1` path. `certified_analysis_paths` remains
+  evidence-gated `edger_ql_p0_v1` path and its optional
+  `edger_ql_p0_v1_limma_gene_sets_v1` extension. `certified_analysis_paths` remains
   empty: the airway and compcodeR reports certify `backend_kernel_only`, while
   public input routes are covered separately by the validation contract and
   locked integration tests. Machine fields state that combined-manifest origin
@@ -98,6 +99,11 @@ extension documented here.
   `summarize` verification mode. `statistical_role:
   "display_only_no_inference"` and `publication_grade_claim: false` are
   normative boundaries, not marketing labels.
+
+  The gene-set path identifies `limma_fry` as the primary self-contained
+  result, `limma_mroast` as corroborative self-contained evidence, and
+  `limma_camera` as a supplementary competitive result. Those classes are
+  separate machine fields and must not be interpreted as one ranked list.
 - `inspect --request REQUEST.json` resolves, fingerprints, and structurally
   inspects one declared input request without writing files. Because full count
   numeric-domain validation is intentionally not run, its scope says
@@ -112,18 +118,25 @@ extension documented here.
   EXECUTABLE] [--r-library DIRECTORY]` verifies an eligible validation bundle,
   runs the locked edgeR QL backend in an independent non-interactive R process,
   and atomically publishes five core result files. A version 1.1 request also
-  publishes the requested `display/` sidecar in that same atomic operation. It
-  never overwrites an existing output directory. Backend diagnostics captured
+  publishes the requested `display/` sidecar in that same atomic operation.
+  When its optional `gene_sets` field is present, the run also publishes the
+  manifested inference artifact `pathway_results.tsv` and reports the gene-set
+  path ID. It never overwrites an existing output directory. Backend diagnostics captured
   by the adapter are forwarded to stderr; the CLI still writes exactly one JSON
   document to stdout.
   The success data includes `ql_fit_parameters` with the explicitly supplied
   `glmQLFit` arguments and resolved `top.proportion`, plus `display_export`
-  provenance (or JSON `null` for a version 1.0 run).
+  provenance (or JSON `null` for a version 1.0 run). A gene-set run adds a
+  `pathways` completion object; older runs do not gain a null placeholder.
 - `summarize --run-dir DIRECTORY` independently verifies a public result
   bundle and returns per-contrast status and FDR-at-0.05 counts. When a display
   sidecar is present, it also verifies its inventory, source binding, PCA
-  coordinates, and reproducible SVG bytes. It rejects incomplete, modified,
-  schema-incompatible, wrong-runtime, and private `backend_kernel_only` output.
+  coordinates, and reproducible SVG bytes. For schema 1.1 pathway bundles it
+  also verifies mapping/status completeness, camera correlation/VIF evidence,
+  and independently recalculates BH within each contrast, method, and
+  hypothesis. Its `pathways.self_contained` and `pathways.competitive` objects
+  remain separate. It rejects incomplete, modified, schema-incompatible,
+  wrong-runtime, and private `backend_kernel_only` output.
 - `--help` and subcommand help return their text inside a successful JSON
   envelope. Parser failures return `INVALID_REQUEST` with exit code 2; argparse
   never writes usage text directly to standard output.
@@ -198,6 +211,13 @@ high-severity warning
 `OUTPUT_DURABILITY_UNCONFIRMED` and
 `publication_status: "published_durability_unconfirmed"`.
 
+If version 1.1 includes `gene_sets`, the backend and analysis schemas become
+1.1 and the manifest also binds `pathway_results.tsv`. This six-root-artifact
+bundle requires `display/`; removing it makes the bundle incomplete. Mapping,
+method, or display failure blocks publication of the entire run, including an
+otherwise valid differential-expression core. Source GMT and annotation
+digests are cross-checked against the private-copy input evidence.
+
 `summarize` captures and hashes the files again. It requires the locked public
 execution identity, checks every manifest record, parses all TSVs with exact
 headers and row widths, rejects duplicate gene/contrast rows, verifies the
@@ -207,13 +227,19 @@ complete gene inventory, and checks tested/non-tested numeric rules. A tested
 `not_reported`. Probabilities must be finite and lie in `[0, 1]`.
 Within each contrast, `summarize` also recomputes the Benjamini-Hochberg
 adjustment from all tested `PValue` entries and rejects any mismatched `FDR`.
+For pathway output, it instead forms distinct BH families by contrast, method,
+and hypothesis. Not-tested sets are retained with reasons and excluded from
+the adjustment; mroast/fry self-contained results are never pooled with camera
+competitive results.
 
 The summary returns all five core files as `consumed_analysis_artifact` records
 and a compact contrast array containing `status_counts` and
 `significance_counts` (`fdr_le_0_05`, `fdr_gt_0_05`, and `not_tested`). If a
-display sidecar is present, verified members are additionally returned as
-`consumed_display_artifact` records with a display summary. A version 1.0
-five-file directory remains valid without `display/`.
+pathway table is present, it is returned as a sixth
+`consumed_analysis_artifact`, with self-contained and competitive summaries
+kept separate. If a display sidecar is present, verified members are
+additionally returned as `consumed_display_artifact` records with a display
+summary. A version 1.0 five-file directory remains valid without `display/`.
 
 For compatibility, the unchanged five-file core does not record whether a
 display was requested. `summarize` therefore verifies a display when present
