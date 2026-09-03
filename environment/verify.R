@@ -5,7 +5,12 @@
 TARGET_LIBRARY_ENV <- "RNASEQ_P0_R_LIBRARY"
 EXPECTED_R_VERSION <- "4.6.1"
 EXPECTED_BIOCONDUCTOR_VERSION <- "3.23"
-EXPECTED_CONDA_PACKAGES <- c(coreutils = "9.5", zlib = "1.3.2", libuv = "1.52.1")
+EXPECTED_CONDA_PACKAGES <- c(
+    coreutils = "9.5",
+    zlib = "1.3.2",
+    libuv = "1.52.1",
+    numpy = "2.4.4"
+)
 EXPECTED_PACKAGES <- c(
   renv = "1.2.4",
   BiocManager = "1.30.27",
@@ -144,6 +149,28 @@ verify_conda_runtime <- function() {
   ))
   if (!identical(libuv_status, 0L)) {
     fail("pkg-config could not resolve the locked libuv installation.")
+  }
+  python <- file.path(prefix, "bin", "python")
+  if (!file.exists(python)) {
+    fail("The locked Python interpreter is missing from CONDA_PREFIX/bin.")
+  }
+  numpy_output <- suppressWarnings(system2(
+    python,
+    c(
+      "-I",
+      "-c",
+      shQuote("import numpy; print(numpy.__version__, end='')")
+    ),
+    stdout = TRUE,
+    stderr = TRUE
+  ))
+  numpy_status <- attr(numpy_output, "status")
+  if (is.null(numpy_status)) {
+    numpy_status <- 0L
+  }
+  if (!identical(numpy_status, 0L) ||
+      !identical(paste(numpy_output, collapse = "\n"), "2.4.4")) {
+    fail("NumPy 2.4.4 cannot be imported by the locked Python interpreter.")
   }
   EXPECTED_CONDA_PACKAGES
 }

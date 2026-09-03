@@ -189,6 +189,7 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
     assert isinstance(document["data"], dict)
     assert document["errors"] == []
     assert document["data"]["toolkit"]["maturity"] == "research_preview"
+    assert document["data"]["analysis_request_schema_versions"] == ["1.0", "1.1"]
     assert document["data"]["certified_analysis_paths"] == []
     paths = document["data"]["evidence_gated_analysis_paths"]
     assert [path["path_id"] for path in paths] == ["edger_ql_p0_v1"]
@@ -198,6 +199,20 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
         "self_attested_not_proven"
     )
     assert paths[0]["publication_grade_claim"] is False
+    displays = document["data"]["non_statistical_display_capabilities"]
+    assert [item["capability_id"] for item in displays] == [
+        "edger_ql_p0_v1_static_svg_display_v1"
+    ]
+    assert displays[0]["analysis_path_id"] == "edger_ql_p0_v1"
+    assert displays[0]["analysis_request_schema_version"] == "1.1"
+    assert displays[0]["statistical_role"] == "display_only_no_inference"
+    assert displays[0]["plot_types"] == {
+        "volcano": "one_per_contrast",
+        "ma": "one_per_contrast",
+        "pca": "one_per_analysis",
+    }
+    assert displays[0]["verification"] == "summarize_source_reproduction"
+    assert displays[0]["publication_grade_claim"] is False
     assert "NaN" not in result.stdout
     assert "Infinity" not in result.stdout
     assert result.stderr == ""
@@ -381,8 +396,9 @@ def test_packaged_r_backend_is_readable_outside_checkout_cwd(tmp_path: Path) -> 
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize("schema_version", ["1.0", "1.1"])
 def test_locked_cli_chain_validate_run_and_summarize(
-    run_module_cli, tmp_path: Path
+    run_module_cli, tmp_path: Path, schema_version: str
 ) -> None:
     rscript = os.environ.get("RNASEQ_P0_RSCRIPT")
     r_library = os.environ.get("RNASEQ_P0_R_LIBRARY")
@@ -414,30 +430,34 @@ def test_locked_cli_chain_validate_run_and_summarize(
     assert_envelope_shape(validate_result.json(), command="validate", status="success")
 
     analysis_request = tmp_path / "analysis-request.json"
-    _write_json(
-        analysis_request,
-        {
-            "schema_version": "1.0",
-            "validated_input_bundle": str(evidence),
-            "design": {
-                "intercept": True,
-                "terms": ["condition"],
-                "variables": {
-                    "condition": {
-                        "type": "factor",
-                        "levels": ["control", "treated"],
-                    }
-                },
-            },
-            "contrasts": [
-                {
-                    "contrast_id": "treated_vs_control",
-                    "weights": {"conditiontreated": 1},
-                    "lfc_threshold": 0,
+    request: dict[str, object] = {
+        "schema_version": schema_version,
+        "validated_input_bundle": str(evidence),
+        "design": {
+            "intercept": True,
+            "terms": ["condition"],
+            "variables": {
+                "condition": {
+                    "type": "factor",
+                    "levels": ["control", "treated"],
                 }
-            ],
+            },
         },
-    )
+        "contrasts": [
+            {
+                "contrast_id": "treated_vs_control",
+                "weights": {"conditiontreated": 1},
+                "lfc_threshold": 0,
+            }
+        ],
+    }
+    if schema_version == "1.1":
+        request["display"] = {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 20,
+            "pca_components": [1, 2],
+        }
+    _write_json(analysis_request, request)
     run_dir = tmp_path / "results"
     run_result = run_module_cli(
         "run",
@@ -456,14 +476,24 @@ def test_locked_cli_chain_validate_run_and_summarize(
     assert_envelope_shape(run_document, command="run", status="success")
     assert run_document["data"]["scope"]["execution_scope"] == ("validated_p0_input")
     assert "backend_stderr" not in run_document["data"]
-    assert sorted(path.name for path in run_dir.iterdir()) == [
+    assert run_document["data"]["ql_fit_parameters"]["abundance.trend"] is True
+    expected_entries = [
         "analysis.json",
         "backend_manifest.json",
         "coefficients.tsv",
         "design.tsv",
         "results.tsv",
     ]
-    assert len(run_document["artifacts"]) == 5
+    if schema_version == "1.1":
+        expected_entries.append("display")
+        assert run_document["data"]["display_export"]["purpose"] == (
+            "display_only_not_for_inference"
+        )
+    else:
+        assert run_document["data"]["display_export"] is None
+    assert sorted(path.name for path in run_dir.iterdir()) == sorted(expected_entries)
+    expected_artifact_count = 12 if schema_version == "1.1" else 5
+    assert len(run_document["artifacts"]) == expected_artifact_count
 
     summary_result = run_module_cli(
         "summarize", "--run-dir", str(run_dir), cwd=tmp_path
@@ -478,7 +508,25 @@ def test_locked_cli_chain_validate_run_and_summarize(
     assert summary_document["data"]["execution_scope"] == "validated_p0_input"
     assert summary_document["data"]["gene_count"] == 40
     assert summary_document["data"]["result_row_count"] == 40
-    assert len(summary_document["artifacts"]) == 5
+    assert len(summary_document["artifacts"]) == expected_artifact_count
+    if schema_version == "1.1":
+        assert summary_document["data"]["display"]["plot_types"] == {
+            "pca": 1,
+            "volcano": 1,
+            "ma": 1,
+        }
+        # The byte-identical legacy core intentionally carries no display
+        # intent; this documented compatibility boundary must remain explicit.
+        (run_dir / "display").rename(tmp_path / "detached-display")
+        detached_result = run_module_cli(
+            "summarize", "--run-dir", str(run_dir), cwd=tmp_path
+        )
+        assert detached_result.returncode == 0
+        detached_document = detached_result.json()
+        assert "display" not in detached_document["data"]
+        assert len(detached_document["artifacts"]) == 5
+    else:
+        assert "display" not in summary_document["data"]
     assert summary_result.stderr == ""
 
 

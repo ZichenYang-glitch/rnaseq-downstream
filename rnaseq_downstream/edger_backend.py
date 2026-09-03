@@ -32,6 +32,7 @@ from .errors import (
     InputReadError,
     InvalidRequestError,
     OutputWriteError,
+    ToolkitError,
 )
 from .provenance import has_control_characters, read_json_object
 
@@ -885,6 +886,42 @@ def _verify_result_stage(
     return analysis, sorted(artifacts, key=lambda item: item["relative_path"])
 
 
+def _verify_complete_public_stage(result_stage: Path) -> None:
+    """Run the public fail-closed reader before a C1 bundle is published."""
+
+    try:
+        from .run_summary import summarize_run
+
+        summary = summarize_run(result_stage)
+    except Exception as error:
+        details: dict[str, Any] = {
+            "reason": "staged_bundle_verification_failed",
+            "cause_type": type(error).__name__,
+        }
+        if isinstance(error, ToolkitError):
+            details.update(
+                {
+                    "cause_code": error.code.value,
+                    "cause_details": dict(error.details),
+                }
+            )
+        raise BackendFailedError(
+            "The complete staged result bundle failed independent verification.",
+            details=details,
+            cause=error,
+        ) from error
+    if not isinstance(summary, Mapping) or summary.get("status") != "verified_complete":
+        raise BackendFailedError(
+            "The complete staged result bundle failed independent verification.",
+            details={
+                "reason": "staged_bundle_verification_incomplete",
+                "observed_status": (
+                    summary.get("status") if isinstance(summary, Mapping) else None
+                ),
+            },
+        )
+
+
 def _publish_noreplace(source: Path, target: Path) -> None:
     if not sys_platform_linux():
         raise OutputWriteError(
@@ -944,9 +981,13 @@ def _execute_document(
     *,
     rscript: str | Path,
     r_library: str | Path | None,
+    display_configuration: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     request_path = workspace / "backend_request.json"
     result_stage = workspace / "results"
+    display_logcpm = workspace / "display-logcpm.tsv"
+    if display_configuration is not None:
+        document["display_export"] = {"path": str(display_logcpm)}
     _write_private_json(request_path, document)
     response, stderr = _invoke_r(
         request_path,
@@ -965,6 +1006,21 @@ def _execute_document(
         raise BackendFailedError(
             "The R response does not carry the exact locked runtime identity."
         )
+    if display_configuration is not None:
+        from .display_bundle import build_display_bundle
+
+        display_artifacts = build_display_bundle(
+            display_dir=result_stage / "display",
+            logcpm_path=display_logcpm,
+            core_dir=result_stage,
+            core_artifacts=artifacts,
+            backend_document=document,
+            backend_data=response_data,
+            configuration=display_configuration,
+        )
+        artifacts.extend(display_artifacts)
+        _fsync_directory(result_stage)
+        _verify_complete_public_stage(result_stage)
     _publish_noreplace(result_stage, target)
     publication_status = "durability_confirmed"
     warnings: list[dict[str, Any]] = []
@@ -1062,6 +1118,7 @@ def run_edger_ql(
             workspace,
             rscript=rscript,
             r_library=r_library,
+            display_configuration=validated.display,
         )
         result["plan_id"] = validated.plan_id
         result["analysis_request_sha256"] = validated.request_sha256

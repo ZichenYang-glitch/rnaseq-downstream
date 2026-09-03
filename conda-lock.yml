@@ -7,13 +7,13 @@
 # Install this environment as "YOURENV" with:
 #     conda-lock install -n YOURENV conda-lock.yml
 # To update a single package to the latest version compatible with the version constraints in the source:
-#     conda-lock lock --md input_sha --md input_md5 --lockfile conda-lock.yml --update PACKAGE
+#     conda-lock lock --md input_md5 --md input_sha --lockfile conda-lock.yml --update PACKAGE
 # To re-solve the entire environment, e.g. after changing a version constraint in the source file:
-#     conda-lock --md input_sha --md input_md5-f environment.p0.yml --lockfile conda-lock.yml
+#     conda-lock --md input_md5 --md input_sha-f environment.p0.yml --lockfile conda-lock.yml
 version: 1
 metadata:
   content_hash:
-    linux-64: 738e8ca49e07a07eebc566d58da6df1ecdcf21aa3ed88020f602c6a7f2792034
+    linux-64: 93e7d3c507fd94ebf0fb4e0d761b03048064fbb97a9157fd21345781218f4194
   channels:
   - url: conda-forge
     used_env_vars: []
@@ -23,8 +23,8 @@ metadata:
   - environment.p0.yml
   inputs_metadata:
     environment.p0.yml:
-      md5: c199d21982934c26cd7bdd6d38c2cd76
-      sha256: 2081f5098bde358a7996555f2f632c2416257efa76004f2b33e4a27c5d803218
+      md5: f44e250f323bbaa09edec9e49e9611d7
+      sha256: b800e0300e79f4a535b1eef195cff2554630d6a9fa5b42de399cd2bf7502094f
 package:
 - name: _openmp_mutex
   version: '4.5'
@@ -219,23 +219,23 @@ package:
   category: main
   optional: false
 - name: curl
-  version: 8.21.0
+  version: 8.22.0
   manager: conda
   platform: linux-64
   dependencies:
     __glibc: '>=2.17,<3.0.a0'
     krb5: '>=1.22.2,<1.23.0a0'
-    libcurl: 8.21.0
+    libcurl: 8.22.0
     libgcc: '>=15'
     libpsl: '>=0.23.1,<0.24.0a0'
     libssh2: '>=1.11.1,<2.0a0'
     libzlib: '>=1.3.2,<2.0a0'
-    openssl: '>=3.5.7,<4.0a0'
+    openssl: '>=3.5.8,<4.0a0'
     zstd: '>=1.5.7,<1.6.0a0'
-  url: https://conda.anaconda.org/conda-forge/linux-64/curl-8.21.0-ha042cf0_5.conda
+  url: https://conda.anaconda.org/conda-forge/linux-64/curl-8.22.0-ha042cf0_0.conda
   hash:
-    md5: 82c2a5fc14064073501f5e1b817f4d80
-    sha256: 0ba202eb4cbf3909d196e919f12e229fbd745e44462e7e3004569d20a26cf02a
+    md5: 399a7c0b7ca511de34c5ee5762cee149
+    sha256: 1a35faf4bf079c4438c52c9795b95d6c97c1b60e0bb51802cf48e2b7352b57e5
   category: main
   optional: false
 - name: cxx-compiler
@@ -375,11 +375,11 @@ package:
   platform: linux-64
   dependencies:
     __glibc: '>=2.17,<3.0.a0'
-    libgcc: '>=14'
-  url: https://conda.anaconda.org/conda-forge/linux-64/fribidi-1.0.16-hb03c661_1.conda
+    libgcc: '>=15'
+  url: https://conda.anaconda.org/conda-forge/linux-64/fribidi-1.0.16-h7cc23a3_2.conda
   hash:
-    md5: 1cd10eda5692519d01bb20e086e214c9
-    sha256: 4846a3ca0402f3fe33ad84ed50ab213c6aafde4a0faef3c5002f6bf753e21671
+    md5: 16d6e5a0f8dbc17bd6669dba6f49bad3
+    sha256: 76dd097bd65d812a9104edb0e266386e152e65928ac5c8eb4f480ce24affc470
   category: main
   optional: false
 - name: gcc
@@ -678,7 +678,7 @@ package:
   category: main
   optional: false
 - name: libcurl
-  version: 8.21.0
+  version: 8.22.0
   manager: conda
   platform: linux-64
   dependencies:
@@ -689,12 +689,12 @@ package:
     libpsl: '>=0.23.1,<0.24.0a0'
     libssh2: '>=1.11.1,<2.0a0'
     libzlib: '>=1.3.2,<2.0a0'
-    openssl: '>=3.5.7,<4.0a0'
+    openssl: '>=3.5.8,<4.0a0'
     zstd: '>=1.5.7,<1.6.0a0'
-  url: https://conda.anaconda.org/conda-forge/linux-64/libcurl-8.21.0-ha042cf0_5.conda
+  url: https://conda.anaconda.org/conda-forge/linux-64/libcurl-8.22.0-ha042cf0_0.conda
   hash:
-    md5: 0ed167049513943d078a6c997df2b4e0
-    sha256: 0b6cc13e36cf19ae9b764740112fc591682e189c99353be9f72f3d96ccf29d79
+    md5: e617deee7af8eb0c04f6296d12b54157
+    sha256: 483b7eb97f56fbb3a9cb7190d33012dfa0a5aaed99ede61465563cd97dd82504
   category: main
   optional: false
 - name: libdeflate
@@ -1120,16 +1120,16 @@ package:
   category: main
   optional: false
 - name: libuuid
-  version: 2.42.2
+  version: 2.42.3
   manager: conda
   platform: linux-64
   dependencies:
     __glibc: '>=2.17,<3.0.a0'
-    libgcc: '>=14'
-  url: https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.2-h5347b49_0.conda
+    libgcc: '>=15'
+  url: https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42.3-hcfc3c73_0.conda
   hash:
-    md5: 01bb81d12c957de066ea7362007df642
-    sha256: 9b1bdce27a7e31f7d241aeecff67a1f3101d52a2b1e33ccc2cdf2613072bf81f
+    md5: 74a0a409d9f4561265d36b789d3f398a
+    sha256: aa58bbba56644ffd062a4a9b358782c5eb7560ccead2ab8f7c5c6ede0a7d33a6
   category: main
   optional: false
 - name: libuv
@@ -1223,6 +1223,25 @@ package:
   hash:
     md5: ee6c0cd80a60961a1f48aa3e0b91f986
     sha256: 5d46557214ed184381dafe835b7c94a474a1c3b307a08a250b1ea4779b44ffb3
+  category: main
+  optional: false
+- name: numpy
+  version: 2.4.4
+  manager: conda
+  platform: linux-64
+  dependencies:
+    __glibc: '>=2.17,<3.0.a0'
+    libblas: '>=3.9.0,<4.0a0'
+    libcblas: '>=3.9.0,<4.0a0'
+    libgcc: '>=14'
+    liblapack: '>=3.9.0,<4.0a0'
+    libstdcxx: '>=14'
+    python: ''
+    python_abi: 3.12.*
+  url: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.4.4-py312h33ff503_0.conda
+  hash:
+    md5: 98f04b59a222970c45c78208aeac8df8
+    sha256: 77f301d5e31c91935aaeebf7d1f408dbd927e04d43a5991de52d26f92b2267f2
   category: main
   optional: false
 - name: openssl
@@ -1349,11 +1368,11 @@ package:
   platform: linux-64
   dependencies:
     __glibc: '>=2.17,<3.0.a0'
-    libgcc: '>=14'
-  url: https://conda.anaconda.org/conda-forge/linux-64/pthread-stubs-0.4-hb03c661_1003.conda
+    libgcc: '>=15'
+  url: https://conda.anaconda.org/conda-forge/linux-64/pthread-stubs-0.4-h7cc23a3_1004.conda
   hash:
-    md5: df2c27f36bdb0dde779f55b5df76a352
-    sha256: afc3b27b2cbb0487c1d0e963f96e71181ecfb623a24fb393bb19ff974a6382a1
+    md5: bb66b610707b811e3c65181a6431e7a8
+    sha256: 4a44fd00ea73b79ca2c89b0727b9ccf61c506ead71e67a9abfa4c590042b5a4a
   category: main
   optional: false
 - name: pygments
@@ -1443,6 +1462,17 @@ package:
   hash:
     md5: ed5d43e9ef92cc2a9872f9bdfe94b984
     sha256: b2df2264f0936b9f95e13ac79b596fac86d3b649812da03a61543e11e669714c
+  category: main
+  optional: false
+- name: python_abi
+  version: '3.12'
+  manager: conda
+  platform: linux-64
+  dependencies: {}
+  url: https://conda.anaconda.org/conda-forge/noarch/python_abi-3.12-9_cp312.conda
+  hash:
+    md5: 4c32076993e6270825441d059ab5c18b
+    sha256: ee9c2922e07afc85fc82d5fa82c9ac2c79da3be3283a5e17bf2f2ae38dbd02fb
   category: main
   optional: false
 - name: r-base

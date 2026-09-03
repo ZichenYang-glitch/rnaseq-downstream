@@ -94,6 +94,41 @@ read_request <- function(path) {
     )
 }
 
+assert_request_envelope <- function(request) {
+    required <- c(
+        "schema_version", "kind", "execution_scope", "analysis_request",
+        "input_evidence", "input", "design", "contrasts"
+    )
+    allowed <- c(required, "validated_input_bundle", "display_export")
+    observed <- names(request)
+    if (!is.list(request) || is.null(observed) ||
+        length(setdiff(required, observed)) > 0L ||
+        length(setdiff(observed, allowed)) > 0L ||
+        anyDuplicated(observed) > 0L) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized backend request envelope is incompatible.",
+            list(
+                reason = "backend_request_schema_invalid",
+                missing_fields = sort(setdiff(required, observed)),
+                unexpected_fields = sort(setdiff(observed, allowed))
+            )
+        )
+    }
+    if (!identical(request$schema_version, "1.0") ||
+        !identical(request$kind, "edger_ql_backend_request") ||
+        !is.character(request$execution_scope) ||
+        length(request$execution_scope) != 1L ||
+        !nzchar(request$execution_scope)) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The normalized backend request identity is incompatible.",
+            list(reason = "backend_request_identity_invalid")
+        )
+    }
+    invisible(request)
+}
+
 as_character_vector <- function(value, field) {
     result <- unlist(value, recursive = FALSE, use.names = FALSE)
     if (!is.character(result) || length(result) == 0L || anyNA(result)) {
@@ -1241,6 +1276,63 @@ file_record <- function(path, relative_path) {
     )
 }
 
+write_display_logcpm <- function(request, y) {
+    specification <- request$display_export
+    if (is.null(specification)) return(NULL)
+    if (!is.list(specification) ||
+        !identical(sort(names(specification)), c("path"))) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The private display export instruction is invalid.",
+            list(reason = "display_export_invalid")
+        )
+    }
+    path <- specification$path
+    if (!is.character(path) || length(path) != 1L || !nzchar(path) ||
+        file.exists(path) || !dir.exists(dirname(path))) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The private display export target is unavailable.",
+            list(reason = "display_export_target_invalid")
+        )
+    }
+    values <- edgeR::cpm(
+        y,
+        normalized.lib.sizes = TRUE,
+        log = TRUE,
+        prior.count = 2
+    )
+    if (!is.matrix(values) || any(!is.finite(values)) ||
+        !identical(colnames(values), colnames(y$counts)) ||
+        !identical(rownames(values), rownames(y$counts))) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The display-only logCPM matrix is invalid.",
+            list(reason = "display_logcpm_invalid")
+        )
+    }
+    table <- data.frame(
+        gene_id = as.character(y$genes$gene_id),
+        as.data.frame(values, check.names = FALSE),
+        check.names = FALSE,
+        stringsAsFactors = FALSE
+    )
+    write_tsv(table, path)
+    list(
+        method = "edgeR::cpm.DGEList",
+        source = "post_filter_post_TMM_observed_DGEList",
+        purpose = "display_only_not_for_inference",
+        arguments = list(
+            normalized.lib.sizes = TRUE,
+            log = TRUE,
+            prior.count = 2
+        ),
+        scale = "log2",
+        gene_count = nrow(values),
+        sample_count = ncol(values)
+    )
+}
+
 run_analysis <- function(request_path, output_dir) {
     if (file.exists(output_dir)) {
         backend_abort(
@@ -1251,6 +1343,7 @@ run_analysis <- function(request_path, output_dir) {
     }
     runtime <- assert_runtime()
     request <- read_request(request_path)
+    assert_request_envelope(request)
     design_info <- build_design(request)
     contrasts <- build_contrasts(request, design_info)
     constructed <- construct_dge(request$input)
@@ -1284,9 +1377,14 @@ run_analysis <- function(request_path, output_dir) {
     fit <- edgeR::glmQLFit(
         y,
         design = design,
+        abundance.trend = TRUE,
         robust = TRUE,
-        legacy = FALSE
+        winsor.tail.p = c(0.05, 0.1),
+        legacy = FALSE,
+        top.proportion = NULL,
+        keep.unit.mat = FALSE
     )
+    display_export <- write_display_logcpm(request, y)
 
     result_tables <- lapply(
         contrasts,
@@ -1422,7 +1520,17 @@ run_analysis <- function(request_path, output_dir) {
             gene_count = length(gene_ids),
             tested_gene_count = sum(keep),
             filtered_gene_count = sum(!keep),
-            contrasts = contrast_provenance
+            contrasts = contrast_provenance,
+            ql_fit_parameters = list(
+                abundance.trend = TRUE,
+                robust = TRUE,
+                winsor.tail.p = c(0.05, 0.1),
+                legacy = FALSE,
+                top.proportion = NULL,
+                resolved_top.proportion = fit$top.proportion,
+                keep.unit.mat = FALSE
+            ),
+            display_export = display_export
         ),
         warnings = list(),
         errors = list(),

@@ -29,7 +29,11 @@ from .provenance import (
 )
 from .validation_bundle import canonical_json_equal, compute_validation_plan_id
 
+# Private R-backend protocol/output schema. Public analysis requests are
+# versioned independently so display-only additions cannot silently alter the
+# statistical protocol.
 ANALYSIS_SCHEMA_VERSION = "1.0"
+ANALYSIS_REQUEST_SCHEMA_VERSIONS = ("1.0", "1.1")
 VALIDATION_BUNDLE_SCHEMA_VERSION = "1.0"
 _BUNDLE_MEMBERS = {
     "input_plan.json",
@@ -105,6 +109,7 @@ class ValidatedAnalysisRequest:
 
     request_path: Path
     request_sha256: str
+    request_schema_version: str
     bundle_path: Path
     plan_id: str
     input_data: dict[str, Any]
@@ -112,6 +117,7 @@ class ValidatedAnalysisRequest:
     validation_bundle_artifacts: tuple[dict[str, Any], ...]
     design: dict[str, Any]
     contrasts: tuple[dict[str, Any], ...]
+    display: dict[str, Any] | None
 
     def to_backend_document(self) -> dict[str, Any]:
         """Return the JSON payload completed later with private input snapshots."""
@@ -811,6 +817,77 @@ def _parse_contrasts(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(normalized)
 
 
+def _parse_display(value: Any) -> dict[str, Any]:
+    """Parse the version-1.1 display-only request.
+
+    Display settings are deliberately kept out of the version-1.0 backend
+    protocol.  They may control only post-result rendering and exploratory PCA
+    display; they must not change input construction, model fitting, contrasts,
+    P values, or multiple-testing adjustment.
+    """
+
+    if not isinstance(value, Mapping):
+        raise InvalidRequestError("'display' must be an object.")
+    require_expected_keys(
+        value,
+        allowed={"fdr_threshold", "pca_top_n", "pca_components"},
+        required={"fdr_threshold", "pca_top_n", "pca_components"},
+        context="analysis display request",
+    )
+
+    fdr_threshold = _finite_number(
+        value["fdr_threshold"], field="display.fdr_threshold"
+    )
+    if fdr_threshold < 0 or fdr_threshold > 1:
+        raise InvalidRequestError(
+            "'display.fdr_threshold' must lie in the closed interval [0, 1].",
+            details={"fdr_threshold": fdr_threshold},
+        )
+
+    pca_top_n = value["pca_top_n"]
+    if isinstance(pca_top_n, bool) or not isinstance(pca_top_n, int) or pca_top_n <= 0:
+        raise InvalidRequestError("'display.pca_top_n' must be a positive integer.")
+
+    pca_components = value["pca_components"]
+    if not isinstance(pca_components, list) or len(pca_components) != 2:
+        raise InvalidRequestError(
+            "'display.pca_components' must contain exactly two component numbers."
+        )
+    normalized_components: list[int] = []
+    for index, component in enumerate(pca_components):
+        if (
+            isinstance(component, bool)
+            or not isinstance(component, int)
+            or component <= 0
+        ):
+            raise InvalidRequestError(
+                "PCA component numbers must be positive integers.",
+                details={
+                    "field": f"display.pca_components[{index}]",
+                    "observed": component,
+                },
+            )
+        normalized_components.append(component)
+    if len(set(normalized_components)) != len(normalized_components):
+        raise InvalidRequestError(
+            "'display.pca_components' must contain two distinct component numbers."
+        )
+    if max(normalized_components) > pca_top_n:
+        raise InvalidRequestError(
+            "A requested PCA component cannot exceed 'display.pca_top_n'.",
+            details={
+                "pca_top_n": pca_top_n,
+                "pca_components": normalized_components,
+            },
+        )
+
+    return {
+        "fdr_threshold": fdr_threshold,
+        "pca_top_n": pca_top_n,
+        "pca_components": normalized_components,
+    }
+
+
 def load_analysis_request(path: str | Path) -> ValidatedAnalysisRequest:
     """Validate an analysis request and its complete checkpoint-A bundle."""
 
@@ -821,30 +898,44 @@ def load_analysis_request(path: str | Path) -> ValidatedAnalysisRequest:
         document_role="analysis_request",
         content=request_content,
     )
-    require_expected_keys(
-        document,
-        allowed={
-            "schema_version",
-            "validated_input_bundle",
-            "design",
-            "contrasts",
-        },
-        required={
-            "schema_version",
-            "validated_input_bundle",
-            "design",
-            "contrasts",
-        },
-        context="analysis request",
-    )
-    if document["schema_version"] != ANALYSIS_SCHEMA_VERSION:
+    base_keys = {
+        "schema_version",
+        "validated_input_bundle",
+        "design",
+        "contrasts",
+    }
+    if "schema_version" not in document:
+        require_expected_keys(
+            document,
+            allowed=base_keys,
+            required=base_keys,
+            context="analysis request",
+        )
+    request_schema_version = document["schema_version"]
+    if request_schema_version not in ANALYSIS_REQUEST_SCHEMA_VERSIONS:
         raise InvalidRequestError(
             "The analysis request schema version is unsupported.",
             details={
-                "observed": document["schema_version"],
-                "supported": ANALYSIS_SCHEMA_VERSION,
+                "observed": request_schema_version,
+                "supported": list(ANALYSIS_REQUEST_SCHEMA_VERSIONS),
             },
         )
+    if request_schema_version == "1.0":
+        require_expected_keys(
+            document,
+            allowed=base_keys,
+            required=base_keys,
+            context="analysis request",
+        )
+        display = None
+    else:
+        require_expected_keys(
+            document,
+            allowed=base_keys | {"display"},
+            required=base_keys | {"display"},
+            context="analysis request version 1.1",
+        )
+        display = _parse_display(document["display"])
     bundle_path = _resolve_bundle(
         document["validated_input_bundle"], request_path=request_path
     )
@@ -857,6 +948,7 @@ def load_analysis_request(path: str | Path) -> ValidatedAnalysisRequest:
     return ValidatedAnalysisRequest(
         request_path=request_path,
         request_sha256=request_digest,
+        request_schema_version=request_schema_version,
         bundle_path=bundle_path,
         plan_id=plan_id,
         input_data=input_data,
@@ -864,10 +956,12 @@ def load_analysis_request(path: str | Path) -> ValidatedAnalysisRequest:
         validation_bundle_artifacts=validation_bundle_artifacts,
         design=_parse_design(document["design"]),
         contrasts=_parse_contrasts(document["contrasts"]),
+        display=display,
     )
 
 
 __all__ = [
+    "ANALYSIS_REQUEST_SCHEMA_VERSIONS",
     "ANALYSIS_SCHEMA_VERSION",
     "ValidatedAnalysisRequest",
     "load_analysis_request",

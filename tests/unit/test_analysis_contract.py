@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from rnaseq_downstream.analysis_contract import _parse_design, load_analysis_request
+from rnaseq_downstream.analysis_contract import (
+    _parse_design,
+    _parse_display,
+    load_analysis_request,
+)
 from rnaseq_downstream.edger_backend import (
     _capture_output_json,
     _invoke_r,
@@ -125,31 +129,38 @@ def _validated_bundle(root: Path) -> Path:
     return bundle
 
 
-def _analysis_request(root: Path, bundle: Path, *, weights: dict[str, float]) -> Path:
-    return _write_json(
-        root / "analysis.json",
-        {
-            "schema_version": "1.0",
-            "validated_input_bundle": str(bundle),
-            "design": {
-                "intercept": True,
-                "terms": ["condition"],
-                "variables": {
-                    "condition": {
-                        "type": "factor",
-                        "levels": ["control", "treated"],
-                    }
-                },
-            },
-            "contrasts": [
-                {
-                    "contrast_id": "treated_vs_control",
-                    "weights": weights,
-                    "lfc_threshold": 0,
+def _analysis_request(
+    root: Path,
+    bundle: Path,
+    *,
+    weights: dict[str, float],
+    schema_version: str = "1.0",
+    display: object | None = None,
+) -> Path:
+    document: dict[str, object] = {
+        "schema_version": schema_version,
+        "validated_input_bundle": str(bundle),
+        "design": {
+            "intercept": True,
+            "terms": ["condition"],
+            "variables": {
+                "condition": {
+                    "type": "factor",
+                    "levels": ["control", "treated"],
                 }
-            ],
+            },
         },
-    )
+        "contrasts": [
+            {
+                "contrast_id": "treated_vs_control",
+                "weights": weights,
+                "lfc_threshold": 0,
+            }
+        ],
+    }
+    if display is not None:
+        document["display"] = display
+    return _write_json(root / "analysis.json", document)
 
 
 def test_analysis_contract_accepts_only_complete_eligible_bundle(
@@ -160,6 +171,8 @@ def test_analysis_contract_accepts_only_complete_eligible_bundle(
 
     validated = load_analysis_request(request)
 
+    assert validated.request_schema_version == "1.0"
+    assert validated.display is None
     assert validated.input_data["input_certification_eligible"] is True
     assert validated.input_data["input_semantics"] == "featurecounts_integer"
     assert {item["role"] for item in validated.validation_bundle_artifacts} == {
@@ -168,6 +181,175 @@ def test_analysis_contract_accepts_only_complete_eligible_bundle(
         "provenance",
         "validated_request",
     }
+
+
+def test_analysis_request_v11_accepts_explicit_display_without_changing_backend_protocol(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.1",
+        display={
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.request_schema_version == "1.1"
+    assert validated.display == {
+        "fdr_threshold": 0.05,
+        "pca_top_n": 500,
+        "pca_components": [1, 2],
+    }
+    backend_document = validated.to_backend_document()
+    assert backend_document["schema_version"] == "1.0"
+    assert "display" not in backend_document
+
+
+def test_analysis_request_v10_stays_strict_and_rejects_display(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        display={
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+    )
+
+    with pytest.raises(InvalidRequestError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["context"] == "analysis request"
+    assert caught.value.details["unknown_keys"] == ["display"]
+
+
+def test_analysis_request_v11_requires_display(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.1",
+    )
+
+    with pytest.raises(InvalidRequestError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["context"] == "analysis request version 1.1"
+    assert caught.value.details["missing_keys"] == ["display"]
+
+
+def test_analysis_request_reports_both_supported_public_versions(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+    )
+
+    with pytest.raises(InvalidRequestError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details == {
+        "observed": "1.2",
+        "supported": ["1.0", "1.1"],
+    }
+
+
+@pytest.mark.parametrize("fdr_threshold", [0, 1])
+def test_display_request_accepts_probability_boundaries_and_axis_order(
+    fdr_threshold: int,
+) -> None:
+    assert _parse_display(
+        {
+            "fdr_threshold": fdr_threshold,
+            "pca_top_n": 2,
+            "pca_components": [2, 1],
+        }
+    ) == {
+        "fdr_threshold": float(fdr_threshold),
+        "pca_top_n": 2,
+        "pca_components": [2, 1],
+    }
+
+
+@pytest.mark.parametrize(
+    "display",
+    [
+        None,
+        {},
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+            "unexpected": True,
+        },
+        {
+            "fdr_threshold": True,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+        {
+            "fdr_threshold": -0.01,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+        {
+            "fdr_threshold": 1.01,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": False,
+            "pca_components": [1, 2],
+        },
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 0,
+            "pca_components": [1, 2],
+        },
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1],
+        },
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1, 1],
+        },
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [True, 2],
+        },
+        {
+            "fdr_threshold": 0.05,
+            "pca_top_n": 2,
+            "pca_components": [1, 3],
+        },
+    ],
+)
+def test_display_request_rejects_noncanonical_or_unsafe_values(
+    display: object,
+) -> None:
+    with pytest.raises(InvalidRequestError):
+        _parse_display(display)
 
 
 def test_analysis_contract_rejects_tampered_or_extra_bundle_entries(

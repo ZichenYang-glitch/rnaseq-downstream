@@ -4,6 +4,7 @@ import csv
 import gzip
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import struct
@@ -16,11 +17,24 @@ from rnaseq_downstream.edger_backend import (
     run_edger_ql,
 )
 from rnaseq_downstream.errors import (
+    BackendFailedError,
     ContrastNotEstimableError,
     DesignRankDeficientError,
+    InputIntegrityError,
+    QCValidationError,
 )
 from rnaseq_downstream.input_semantics import inspect_request
+from rnaseq_downstream.run_summary import summarize_run
 from rnaseq_downstream.validation_bundle import validate_request_to_bundle
+
+
+_CORE_OUTPUT_NAMES = {
+    "analysis.json",
+    "backend_manifest.json",
+    "coefficients.tsv",
+    "design.tsv",
+    "results.tsv",
+}
 
 
 def _locked_runtime() -> tuple[str, str]:
@@ -108,6 +122,120 @@ def _read_tsv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle, delimiter="\t"))
 
 
+def _display_configuration(
+    *, pca_components: list[int] | None = None
+) -> dict[str, object]:
+    return {
+        "fdr_threshold": 0.05,
+        "pca_top_n": 40,
+        "pca_components": pca_components or [1, 2],
+    }
+
+
+def _assert_display_bundle(
+    output: Path,
+    result: dict[str, object],
+    *,
+    configuration: dict[str, object],
+    sample_count: int = 6,
+) -> None:
+    analysis = result["analysis"]
+    data = result["data"]
+    assert isinstance(analysis, dict)
+    assert isinstance(data, dict)
+    contrast_ids = [item["contrast_id"] for item in analysis["contrasts"]]
+    expected_display_names = {
+        "display_manifest.json",
+        "logcpm.tsv",
+        "pca.svg",
+        "pca_coordinates.tsv",
+        "pca_selected_genes.tsv",
+        *{f"volcano--{identifier}.svg" for identifier in contrast_ids},
+        *{f"ma--{identifier}.svg" for identifier in contrast_ids},
+    }
+    assert {item.name for item in output.iterdir()} == _CORE_OUTPUT_NAMES | {"display"}
+    display = output / "display"
+    assert display.is_dir() and not display.is_symlink()
+    assert {item.name for item in display.iterdir()} == expected_display_names
+
+    logcpm_rows = _read_tsv(display / "logcpm.tsv")
+    assert len(logcpm_rows) == data["tested_gene_count"]
+    assert list(logcpm_rows[0]) == [
+        "gene_id",
+        *(f"s{index + 1}" for index in range(sample_count)),
+    ]
+    assert len({row["gene_id"] for row in logcpm_rows}) == len(logcpm_rows)
+    assert all(
+        math.isfinite(float(row[f"s{index + 1}"]))
+        for row in logcpm_rows
+        for index in range(sample_count)
+    )
+
+    expected_logcpm_method = {
+        "method": "edgeR::cpm.DGEList",
+        "source": "post_filter_post_TMM_observed_DGEList",
+        "purpose": "display_only_not_for_inference",
+        "arguments": {
+            "normalized.lib.sizes": True,
+            "log": True,
+            "prior.count": 2,
+        },
+        "scale": "log2",
+        "gene_count": len(logcpm_rows),
+        "sample_count": sample_count,
+    }
+    assert data["display_export"] == expected_logcpm_method
+
+    manifest = json.loads(
+        (display / "display_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["schema_version"] == "1.0"
+    assert manifest["kind"] == "rnaseq_downstream_display_manifest"
+    assert manifest["configuration"] == configuration
+    assert manifest["methods"]["logcpm"] == expected_logcpm_method
+    source = manifest["source_bundle"]
+    assert source["analysis_request_schema_version"] == "1.1"
+    assert source["analysis_request_sha256"] == result["analysis_request_sha256"]
+    assert source["plan_id"] == result["plan_id"]
+    source_members = {item["path"]: item for item in source["members"]}
+    assert set(source_members) == _CORE_OUTPUT_NAMES
+    for name, record in source_members.items():
+        assert record["sha256"] == _sha256(output / name)
+        assert record["size_bytes"] == (output / name).stat().st_size
+    display_members = {item["path"]: item for item in manifest["members"]}
+    assert set(display_members) == expected_display_names - {"display_manifest.json"}
+    logcpm_member = display_members["logcpm.tsv"]
+    assert logcpm_member["role"] == "display_logcpm"
+    assert logcpm_member["sha256"] == _sha256(display / "logcpm.tsv")
+    assert logcpm_member["size_bytes"] == (display / "logcpm.tsv").stat().st_size
+
+    pca_selected_rows = _read_tsv(display / "pca_selected_genes.tsv")
+    summary = summarize_run(output)
+    assert summary["status"] == "verified_complete"
+    assert summary["display"] == {
+        "schema_version": "1.0",
+        "status": "verified_complete",
+        "source_bundle_id": source["source_bundle_id"],
+        "plot_count": 1 + 2 * len(contrast_ids),
+        "plot_types": {
+            "pca": 1,
+            "volcano": len(contrast_ids),
+            "ma": len(contrast_ids),
+        },
+        "tested_gene_count": len(logcpm_rows),
+        "pca_gene_count": len(pca_selected_rows),
+        "sample_count": sample_count,
+        "configuration": configuration,
+    }
+    artifact_paths = {
+        Path(item["path"]).relative_to(output).as_posix()
+        for item in summary["artifacts"]
+    }
+    assert artifact_paths == _CORE_OUTPUT_NAMES | {
+        f"display/{name}" for name in expected_display_names
+    }
+
+
 def test_locked_benchmark_kernel_runs_ql_and_treat(tmp_path: Path) -> None:
     rscript, r_library = _locked_runtime()
     counts, metadata = _matrix_and_metadata(tmp_path)
@@ -160,6 +288,8 @@ def test_locked_benchmark_kernel_runs_ql_and_treat(tmp_path: Path) -> None:
         for row in coefficients
         if row["status"] == "tested"
     )
+    assert {item.name for item in output.iterdir()} == _CORE_OUTPUT_NAMES
+    assert result["data"]["display_export"] is None
 
 
 def test_locked_design_and_contrast_failures_publish_nothing(tmp_path: Path) -> None:
@@ -328,22 +458,24 @@ def _common_request(
     )
 
 
-def _analysis_request(root: Path, bundle: Path) -> Path:
-    return _write_json(
-        root / "analysis-request.json",
-        {
-            "schema_version": "1.0",
-            "validated_input_bundle": str(bundle),
-            "design": _design(),
-            "contrasts": _contrasts(),
-        },
-    )
+def _analysis_request(
+    root: Path,
+    bundle: Path,
+    *,
+    display: dict[str, object] | None = None,
+) -> Path:
+    request: dict[str, object] = {
+        "schema_version": "1.1" if display is not None else "1.0",
+        "validated_input_bundle": str(bundle),
+        "design": _design(),
+        "contrasts": _contrasts(),
+    }
+    if display is not None:
+        request["display"] = display
+    return _write_json(root / "analysis-request.json", request)
 
 
-@pytest.mark.parametrize("layout", ["combined_matrix", "per_sample_files"])
-def test_locked_featurecounts_routes_execute(tmp_path: Path, layout: str) -> None:
-    rscript, r_library = _locked_runtime()
-    root = tmp_path / layout
+def _validated_featurecounts_bundle(root: Path, *, layout: str) -> Path:
     request, samples = _common_request(
         root,
         semantics="featurecounts_integer",
@@ -422,10 +554,24 @@ def test_locked_featurecounts_routes_execute(tmp_path: Path, layout: str) -> Non
     request_path = _write_json(root / "request.json", request)
     bundle = root / "validated"
     validate_request_to_bundle(request_path, bundle)
+    return bundle
+
+
+@pytest.mark.parametrize(
+    ("layout", "with_display"),
+    [("combined_matrix", True), ("per_sample_files", False)],
+)
+def test_locked_featurecounts_routes_execute(
+    tmp_path: Path, layout: str, with_display: bool
+) -> None:
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / layout
+    bundle = _validated_featurecounts_bundle(root, layout=layout)
     output = root / "results"
+    display = _display_configuration() if with_display else None
 
     result = run_edger_ql(
-        _analysis_request(root, bundle),
+        _analysis_request(root, bundle, display=display),
         output,
         rscript=rscript,
         r_library=r_library,
@@ -438,6 +584,141 @@ def test_locked_featurecounts_routes_execute(tmp_path: Path, layout: str) -> Non
         "count_semantics": "integer",
         "transcript_length_offset": False,
     }
+    if display is None:
+        assert {item.name for item in output.iterdir()} == _CORE_OUTPUT_NAMES
+        assert result["data"]["display_export"] is None
+        summary = summarize_run(output)
+        assert summary["status"] == "verified_complete"
+        assert "display" not in summary
+        assert len(summary["artifacts"]) == len(_CORE_OUTPUT_NAMES)
+    else:
+        _assert_display_bundle(output, result, configuration=display)
+
+
+def test_locked_v11_display_keeps_de_tables_byte_identical_to_v10(
+    tmp_path: Path,
+) -> None:
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / "display-byte-invariance"
+    bundle = _validated_featurecounts_bundle(root, layout="combined_matrix")
+    core_output = root / "v1.0-results"
+    display_output = root / "v1.1-results"
+
+    run_edger_ql(
+        _analysis_request(root, bundle),
+        core_output,
+        rscript=rscript,
+        r_library=r_library,
+    )
+    run_edger_ql(
+        _analysis_request(root, bundle, display=_display_configuration()),
+        display_output,
+        rscript=rscript,
+        r_library=r_library,
+    )
+
+    for name in ("results.tsv", "coefficients.tsv", "design.tsv"):
+        assert (display_output / name).read_bytes() == (core_output / name).read_bytes()
+
+
+def test_locked_featurecounts_display_failure_publishes_nothing(
+    tmp_path: Path,
+) -> None:
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / "display-dimension-failure"
+    bundle = _validated_featurecounts_bundle(root, layout="combined_matrix")
+    output = root / "must-not-exist"
+    display = _display_configuration(pca_components=[1, 6])
+
+    with pytest.raises(QCValidationError) as caught:
+        run_edger_ql(
+            _analysis_request(root, bundle, display=display),
+            output,
+            rscript=rscript,
+            r_library=r_library,
+        )
+
+    assert caught.value.details["reason"] == "insufficient_pca_dimensions"
+    assert caught.value.details["maximum_components"] == 5
+    assert not output.exists()
+    assert not list(root.glob(f".{output.name}.edger-*"))
+
+
+@pytest.mark.parametrize("failure_kind", ["verifier", "internal"])
+def test_locked_staged_display_verification_failure_publishes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_kind: str,
+) -> None:
+    from rnaseq_downstream import run_summary
+
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / f"staged-verification-{failure_kind}"
+    bundle = _validated_featurecounts_bundle(root, layout="combined_matrix")
+    output = root / "must-not-exist"
+
+    def fail_staged_verification(_run_dir: str | Path) -> dict[str, object]:
+        if failure_kind == "verifier":
+            raise InputIntegrityError(
+                "Injected staged verifier failure.", details={"injected": True}
+            )
+        raise RuntimeError("injected staged verifier internal failure")
+
+    monkeypatch.setattr(run_summary, "summarize_run", fail_staged_verification)
+
+    with pytest.raises(BackendFailedError) as caught:
+        run_edger_ql(
+            _analysis_request(root, bundle, display=_display_configuration()),
+            output,
+            rscript=rscript,
+            r_library=r_library,
+        )
+
+    assert caught.value.details["reason"] == "staged_bundle_verification_failed"
+    if failure_kind == "verifier":
+        assert caught.value.details["cause_type"] == "InputIntegrityError"
+        assert caught.value.details["cause_code"] == "INPUT_INTEGRITY_FAILED"
+        assert caught.value.details["cause_details"] == {"injected": True}
+    else:
+        assert caught.value.details == {
+            "reason": "staged_bundle_verification_failed",
+            "cause_type": "RuntimeError",
+        }
+    assert not output.exists()
+    assert not list(root.glob(f".{output.name}.edger-*"))
+
+
+def test_locked_r_backend_rejects_unknown_private_request_field(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rnaseq_downstream import edger_backend
+
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / "private-envelope-defense"
+    bundle = _validated_featurecounts_bundle(root, layout="combined_matrix")
+    output = root / "must-not-exist"
+    original_write = edger_backend._write_private_json
+
+    def write_with_unknown_field(path: Path, document: dict[str, object]) -> None:
+        altered = dict(document)
+        altered["unexpected_private_field"] = True
+        original_write(path, altered)
+
+    monkeypatch.setattr(edger_backend, "_write_private_json", write_with_unknown_field)
+
+    with pytest.raises(BackendFailedError) as caught:
+        run_edger_ql(
+            _analysis_request(root, bundle),
+            output,
+            rscript=rscript,
+            r_library=r_library,
+        )
+
+    assert caught.value.details["reason"] == "backend_request_schema_invalid"
+    assert caught.value.details["unexpected_fields"] == "unexpected_private_field"
+    assert not output.exists()
+    assert not list(root.glob(f".{output.name}.edger-*"))
 
 
 def _salmon_request(
@@ -547,9 +828,10 @@ def test_locked_salmon_routes_execute(
     bundle = root / "validated"
     validate_request_to_bundle(request_path, bundle)
     output = root / "results"
+    display = _display_configuration()
 
     result = run_edger_ql(
-        _analysis_request(root, bundle),
+        _analysis_request(root, bundle, display=display),
         output,
         rscript=rscript,
         r_library=r_library,
@@ -566,6 +848,7 @@ def test_locked_salmon_routes_execute(
         assert route["transcript_length_offset"] is True
         assert route["divide"] is (inferential_replicates >= 2)
         assert route["inferential_replicates_imported"] is (inferential_replicates > 0)
+    _assert_display_bundle(output, result, configuration=display)
 
 
 def test_locked_r_backend_independently_rejects_one_full_length_replicate(

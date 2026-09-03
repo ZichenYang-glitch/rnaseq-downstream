@@ -197,13 +197,16 @@ def centered_unscaled_pca(values: object, n_components: int = 2) -> PCAResult:
             reason="invalid_component_count",
             n_components=repr(n_components),
         )
-    maximum = min(matrix.shape)
+    # Centering removes at most one sample-space direction. Feature space is
+    # not reduced merely because there are fewer features than samples.
+    maximum = min(matrix.shape[0] - 1, matrix.shape[1])
     if n_components > maximum:
         _validation_error(
-            "The requested PCA dimensions exceed the matrix dimensions.",
+            "The requested PCA dimensions exceed the centered-matrix limit.",
             reason="insufficient_pca_dimensions",
             n_components=int(n_components),
             shape=list(matrix.shape),
+            maximum_components=int(maximum),
         )
 
     means = matrix.mean(axis=0)

@@ -22,6 +22,39 @@ from rnaseq_downstream.errors import (
 
 
 @pytest.mark.unit
+def test_capabilities_exposes_v11_display_without_changing_analysis_path() -> None:
+    data = cli._capabilities(SimpleNamespace())
+
+    assert data["analysis_request_schema_versions"] == ["1.0", "1.1"]
+    assert [path["path_id"] for path in data["evidence_gated_analysis_paths"]] == [
+        "edger_ql_p0_v1"
+    ]
+    assert data["certified_analysis_paths"] == []
+    assert data["non_statistical_display_capabilities"] == [
+        {
+            "capability_id": "edger_ql_p0_v1_static_svg_display_v1",
+            "maturity": "research_preview",
+            "analysis_path_id": "edger_ql_p0_v1",
+            "analysis_request_schema_version": "1.1",
+            "invocation": "optional_same_run",
+            "statistical_role": "display_only_no_inference",
+            "output_location": "display/",
+            "output_format": "svg",
+            "plot_types": {
+                "volcano": "one_per_contrast",
+                "ma": "one_per_contrast",
+                "pca": "one_per_analysis",
+            },
+            "pca_input": "post_filter_post_tmm_edger_logcpm",
+            "pca_scaling": "centered_unscaled",
+            "determinism_scope": "locked_runtime",
+            "verification": "summarize_source_reproduction",
+            "publication_grade_claim": False,
+        }
+    ]
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("command", "failure", "expected_exit", "expected_status", "expected_code"),
     [
@@ -213,6 +246,16 @@ def test_run_forwards_backend_logs_to_stderr_and_returns_artifacts(
                 "gene_count": 100,
                 "tested_gene_count": 80,
                 "filtered_gene_count": 20,
+                "ql_fit_parameters": {
+                    "abundance.trend": True,
+                    "robust": True,
+                    "winsor.tail.p": [0.05, 0.1],
+                    "legacy": False,
+                    "top.proportion": None,
+                    "resolved_top.proportion": 0.1,
+                    "keep.unit.mat": False,
+                },
+                "display_export": None,
                 "contrasts": [{"contrast_id": "treated_vs_control"}],
             },
             "warnings": [],
@@ -244,6 +287,9 @@ def test_run_forwards_backend_logs_to_stderr_and_returns_artifacts(
         "self_attested_not_proven"
     )
     assert envelope["data"]["scope"]["publication_grade_claim"] is False
+    assert envelope["data"]["ql_fit_parameters"]["abundance.trend"] is True
+    assert envelope["data"]["ql_fit_parameters"]["winsor.tail.p"] == [0.05, 0.1]
+    assert envelope["data"]["display_export"] is None
     assert envelope["artifacts"][0]["role"] == "results"
     assert captured.out == ""
     assert captured.err == "edgeR diagnostic\n"

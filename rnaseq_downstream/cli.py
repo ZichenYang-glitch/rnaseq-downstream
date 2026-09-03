@@ -132,6 +132,8 @@ def _build_parser() -> _JsonArgumentParser:
 
 
 def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
+    from .analysis_contract import ANALYSIS_REQUEST_SCHEMA_VERSIONS
+
     return {
         "toolkit": {
             "name": "rnaseq-downstream",
@@ -165,6 +167,7 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
             "salmon_quant_dirs_full_length",
             "salmon_quant_dirs_three_prime",
         ],
+        "analysis_request_schema_versions": list(ANALYSIS_REQUEST_SCHEMA_VERSIONS),
         "certified_analysis_paths": [],
         "evidence_gated_analysis_paths": [
             {
@@ -188,6 +191,28 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
                 ),
                 "combined_manifest_origin_authentication": ("self_attested_not_proven"),
                 "end_to_end_publication_grade_claim": False,
+                "publication_grade_claim": False,
+            }
+        ],
+        "non_statistical_display_capabilities": [
+            {
+                "capability_id": "edger_ql_p0_v1_static_svg_display_v1",
+                "maturity": "research_preview",
+                "analysis_path_id": "edger_ql_p0_v1",
+                "analysis_request_schema_version": "1.1",
+                "invocation": "optional_same_run",
+                "statistical_role": "display_only_no_inference",
+                "output_location": "display/",
+                "output_format": "svg",
+                "plot_types": {
+                    "volcano": "one_per_contrast",
+                    "ma": "one_per_contrast",
+                    "pca": "one_per_analysis",
+                },
+                "pca_input": "post_filter_post_tmm_edger_logcpm",
+                "pca_scaling": "centered_unscaled",
+                "determinism_scope": "locked_runtime",
+                "verification": "summarize_source_reproduction",
                 "publication_grade_claim": False,
             }
         ],
@@ -307,6 +332,8 @@ def _run(arguments: argparse.Namespace) -> _CommandResult:
             "tested": backend_data.get("tested_gene_count"),
             "filtered": backend_data.get("filtered_gene_count"),
         },
+        "ql_fit_parameters": backend_data.get("ql_fit_parameters"),
+        "display_export": backend_data.get("display_export"),
         "contrasts": backend_data.get("contrasts"),
     }
     return _CommandResult(

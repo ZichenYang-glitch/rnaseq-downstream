@@ -15,14 +15,14 @@ from .errors import InputIntegrityError, InputReadError, InvalidRequestError
 from .provenance import has_control_characters
 
 SUMMARY_SCHEMA_VERSION = "1.0"
-_EXPECTED_FILES = {
+_CORE_FILES = {
     "analysis.json",
     "backend_manifest.json",
     "coefficients.tsv",
     "design.tsv",
     "results.tsv",
 }
-_MANIFESTED_FILES = _EXPECTED_FILES - {"backend_manifest.json"}
+_MANIFESTED_FILES = _CORE_FILES - {"backend_manifest.json"}
 _EXPECTED_RUNTIME = {
     "R": "4.6.1",
     "Bioconductor": "3.23",
@@ -121,7 +121,9 @@ def _capture(path: Path) -> tuple[bytes, str, int]:
     return content, hashlib.sha256(content).hexdigest(), len(content)
 
 
-def _capture_bundle(run_dir: Path) -> dict[str, tuple[bytes, str, int]]:
+def _capture_bundle(
+    run_dir: Path,
+) -> tuple[dict[str, tuple[bytes, str, int]], Path | None]:
     try:
         before = run_dir.stat()
         entries = list(run_dir.iterdir())
@@ -133,17 +135,22 @@ def _capture_bundle(run_dir: Path) -> dict[str, tuple[bytes, str, int]]:
             cause=error,
         ) from error
     names = {entry.name for entry in entries}
+    expected_names = _CORE_FILES | ({"display"} if "display" in names else set())
     unsafe = sorted(
-        entry.name for entry in entries if entry.is_symlink() or not entry.is_file()
+        entry.name
+        for entry in entries
+        if entry.is_symlink()
+        or (entry.name == "display" and not entry.is_dir())
+        or (entry.name != "display" and not entry.is_file())
     )
-    if names != _EXPECTED_FILES or unsafe:
+    if names != expected_names or unsafe:
         raise _integrity(
-            "The result bundle does not contain exactly the five required regular files.",
-            missing_files=sorted(_EXPECTED_FILES - names),
-            unexpected_files=sorted(names - _EXPECTED_FILES),
+            "The result bundle must contain the five core files and optionally one display directory.",
+            missing_files=sorted(_CORE_FILES - names),
+            unexpected_files=sorted(names - (_CORE_FILES | {"display"})),
             unsafe_files=unsafe,
         )
-    captured = {name: _capture(run_dir / name) for name in sorted(_EXPECTED_FILES)}
+    captured = {name: _capture(run_dir / name) for name in sorted(_CORE_FILES)}
     try:
         after = run_dir.stat()
         final_names = {entry.name for entry in run_dir.iterdir()}
@@ -156,9 +163,10 @@ def _capture_bundle(run_dir: Path) -> dict[str, tuple[bytes, str, int]]:
         ) from error
     before_identity = (before.st_dev, before.st_ino)
     after_identity = (after.st_dev, after.st_ino)
-    if before_identity != after_identity or final_names != _EXPECTED_FILES:
+    if before_identity != after_identity or final_names != expected_names:
         raise _integrity("The result bundle changed while it was captured.")
-    return captured
+    display_dir = run_dir / "display" if "display" in names else None
+    return captured, display_dir
 
 
 def _json_object(content: bytes, *, role: str) -> dict[str, Any]:
@@ -612,9 +620,7 @@ def _verify_analysis(
         },
         {
             "step": "contrast_test",
-            "dispatch": (
-                "lfc_threshold == 0: glmQLFTest; " "lfc_threshold > 0: glmTreat"
-            ),
+            "dispatch": ("lfc_threshold == 0: glmQLFTest; lfc_threshold > 0: glmTreat"),
         },
     ]
     if analysis.get("pipeline") != expected_pipeline:
@@ -847,8 +853,9 @@ def _verify_results(
             row=row_number,
             field="lfc_threshold",
         )
-        if threshold != specification["lfc_threshold"] or values["test_method"] != (
-            specification["test_method"]
+        if (
+            threshold != specification["lfc_threshold"]
+            or values["test_method"] != (specification["test_method"])
         ):
             raise _integrity(
                 "A result row disagrees with its declared contrast test.",
@@ -1009,7 +1016,7 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
     """
 
     resolved = _resolve_run_dir(run_dir)
-    captured = _capture_bundle(resolved)
+    captured, display_dir = _capture_bundle(resolved)
     manifest = _json_object(
         captured["backend_manifest.json"][0], role="backend_manifest"
     )
@@ -1019,7 +1026,7 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
     design_rows = _tsv_rows(
         captured["design.tsv"][0], expected_header=_DESIGN_HEADER, role="design.tsv"
     )
-    _, design_columns = _verify_design(design_rows, analysis)
+    design_samples, design_columns = _verify_design(design_rows, analysis)
     result_rows = _tsv_rows(
         captured["results.tsv"][0],
         expected_header=_RESULT_HEADER,
@@ -1040,7 +1047,7 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
         raise _integrity("Coefficient and result gene statuses disagree.")
 
     artifacts = []
-    for name in sorted(_EXPECTED_FILES):
+    for name in sorted(_CORE_FILES):
         _, digest, size = captured[name]
         artifacts.append(
             {
@@ -1052,7 +1059,7 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
             }
         )
     evidence = manifest["input_evidence"]
-    return {
+    summary = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "status": "verified_complete",
         "run_dir": str(resolved),
@@ -1066,6 +1073,20 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
         "contrasts": contrast_summaries,
         "artifacts": artifacts,
     }
+    if display_dir is not None:
+        from .display_bundle import verify_display_bundle
+
+        display = verify_display_bundle(
+            display_dir=display_dir,
+            core_dir=resolved,
+            core_captured=captured,
+            analysis=analysis,
+            backend_manifest=manifest,
+            expected_sample_ids=design_samples,
+        )
+        summary["display"] = display["summary"]
+        summary["artifacts"].extend(display["artifacts"])
+    return summary
 
 
 __all__ = ["SUMMARY_SCHEMA_VERSION", "summarize_run"]

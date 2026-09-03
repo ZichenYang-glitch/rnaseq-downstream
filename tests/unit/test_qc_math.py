@@ -78,10 +78,10 @@ def test_top_variable_selection_rejects_duplicate_feature_ids() -> None:
 def test_centered_pca_is_unscaled_and_has_stable_signs() -> None:
     values = np.asarray(
         [
-            [-100.0, -1.0],
-            [-50.0, 1.0],
-            [50.0, -1.0],
-            [100.0, 1.0],
+            [-100.0, -1.0, 5.0],
+            [-50.0, 1.0, 5.0],
+            [50.0, -1.0, 5.0],
+            [100.0, 1.0, 5.0],
         ]
     )
 
@@ -101,12 +101,57 @@ def test_centered_pca_is_unscaled_and_has_stable_signs() -> None:
 
 
 def test_centered_pca_does_not_mutate_input() -> None:
-    values = np.asarray([[0.0, 2.0], [1.0, 0.0], [3.0, 1.0]])
+    values = np.asarray([[0.0, 2.0, 5.0], [1.0, 0.0, 5.0], [3.0, 1.0, 5.0]])
     original = values.copy()
 
     centered_unscaled_pca(values)
 
     np.testing.assert_array_equal(values, original)
+
+
+def test_centered_pca_rejects_second_component_for_two_samples() -> None:
+    values = np.asarray(
+        [
+            [0.0, 1.0, 2.0],
+            [3.0, 4.0, 5.0],
+        ]
+    )
+
+    with pytest.raises(QCValidationError) as exc_info:
+        centered_unscaled_pca(values, n_components=2)
+
+    _assert_reason(exc_info, "insufficient_pca_dimensions")
+    assert exc_info.value.details["shape"] == [2, 3]
+    assert exc_info.value.details["maximum_components"] == 1
+
+
+def test_centered_pca_accepts_the_only_direction_for_two_samples() -> None:
+    result = centered_unscaled_pca(
+        [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]],
+        n_components=1,
+    )
+
+    assert result.coordinates.shape == (2, 1)
+    assert result.components.shape == (1, 3)
+    assert result.explained_variance_ratio.shape == (1,)
+
+
+def test_centered_pca_preserves_feature_directions_when_samples_are_plentiful() -> None:
+    values = np.asarray(
+        [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+            [2.0, 1.0],
+            [1.0, 3.0],
+        ]
+    )
+
+    result = centered_unscaled_pca(values, n_components=2)
+
+    assert result.coordinates.shape == (5, 2)
+    assert result.components.shape == (2, 2)
+    assert result.explained_variance_ratio.shape == (2,)
 
 
 def test_metadata_alignment_is_lossless_and_explicit() -> None:
@@ -456,9 +501,9 @@ def test_joint_design_requires_positive_residual_df() -> None:
 
 
 def test_legacy_qc_module_no_longer_imports_scaled_sklearn_pca() -> None:
-    source = (
-        PROJECT_ROOT / "legacy" / "modules" / "deseq.py"
-    ).read_text(encoding="utf-8")
+    source = (PROJECT_ROOT / "legacy" / "modules" / "deseq.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "StandardScaler" not in source
     assert "sklearn.decomposition" not in source
@@ -475,9 +520,9 @@ def test_qc_pca_top_n_is_explicitly_wired_through_both_legacy_callers() -> None:
     qc_script_source = (legacy_root / "scripts" / "run_qc.py").read_text(
         encoding="utf-8"
     )
-    snakemake_source = (
-        legacy_root / "workflow" / "rules" / "rnaseq.smk"
-    ).read_text(encoding="utf-8")
+    snakemake_source = (legacy_root / "workflow" / "rules" / "rnaseq.smk").read_text(
+        encoding="utf-8"
+    )
 
     assert "'QC_PCA_TOP_N': 500" in config_source
     assert "'QC_BIOLOGY_FACTORS': None" in config_source

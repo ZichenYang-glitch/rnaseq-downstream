@@ -27,6 +27,7 @@ EXPECTED_CONDA_PINS = {
     "python": "3.12.12",
     "r-base": "4.6.1",
     "pytest": "8.4.2",
+    "numpy": "2.4.4",
     "coreutils": "9.5",
     "zlib": "1.3.2",
     "libuv": "1.52.1",
@@ -41,7 +42,9 @@ EXPECTED_R_PINS = {
     "compcodeR": "1.48.0",
     "airway": "1.32.0",
 }
-EXPECTED_CONDA_CONTENT_HASH = "738e8ca49e07a07eebc566d58da6df1ecdcf21aa3ed88020f602c6a7f2792034"
+EXPECTED_CONDA_CONTENT_HASH = (
+    "93e7d3c507fd94ebf0fb4e0d761b03048064fbb97a9157fd21345781218f4194"
+)
 EXPECTED_SOURCE_RECORDS = {
     "renv": {
         "version": "1.2.4",
@@ -106,15 +109,25 @@ def _parse_conda_package_records(text: str) -> dict[str, dict[str, str]]:
             current = {"name": match.group(1)}
             records[current["name"]] = current
             in_hash = False
-        elif current is not None and (match := re.fullmatch(r"  version: '?([^']+)'?", line)):
+        elif current is not None and (
+            match := re.fullmatch(r"  version: '?([^']+)'?", line)
+        ):
             current["version"] = match.group(1)
-        elif current is not None and (match := re.fullmatch(r"  platform: ([A-Za-z0-9_-]+)", line)):
+        elif current is not None and (
+            match := re.fullmatch(r"  platform: ([A-Za-z0-9_-]+)", line)
+        ):
             current["platform"] = match.group(1)
-        elif current is not None and (match := re.fullmatch(r"  url: (https://\S+)", line)):
+        elif current is not None and (
+            match := re.fullmatch(r"  url: (https://\S+)", line)
+        ):
             current["url"] = match.group(1)
         elif current is not None and line == "  hash:":
             in_hash = True
-        elif current is not None and in_hash and (match := re.fullmatch(r"    sha256: ([0-9a-f]{64})", line)):
+        elif (
+            current is not None
+            and in_hash
+            and (match := re.fullmatch(r"    sha256: ([0-9a-f]{64})", line))
+        ):
             current["sha256"] = match.group(1)
         elif current is not None and line and not line.startswith(" "):
             current = None
@@ -150,11 +163,15 @@ def test_conda_lock_matches_source_and_contains_hashed_linux_64_records() -> Non
         record["url"].startswith("https://conda.anaconda.org/conda-forge/")
         for record in records.values()
     )
-    assert all(re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) for record in records.values())
+    assert all(
+        re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) for record in records.values()
+    )
     for package, version in EXPECTED_CONDA_PINS.items():
         assert records[package]["version"] == version
         assert records[package]["platform"] == "linux-64"
-        assert records[package]["url"].startswith("https://conda.anaconda.org/conda-forge/")
+        assert records[package]["url"].startswith(
+            "https://conda.anaconda.org/conda-forge/"
+        )
         assert re.fullmatch(r"[0-9a-f]{64}", records[package]["sha256"])
 
 
@@ -169,6 +186,7 @@ def test_python_build_backend_matches_locked_toolchain() -> None:
     ]
     assert records["setuptools"]["version"] == "84.0.0"
     assert records["wheel"]["version"] == "0.48.0"
+    assert project["project"]["dependencies"] == ["numpy==2.4.4"]
 
 
 @pytest.mark.unit
@@ -238,7 +256,10 @@ def test_bootstrap_is_noninteractive_checksum_gated_and_ordered() -> None:
     assert 'c("--exists", "libuv")' in text
     assert 'TARGET_LIBRARY_MARKER <- ".rnaseq-downstream-p0-library"' in text
     assert "refusing to clean it" in text
-    assert 'PRIMARY_INSTALL_ORDER <- c("limma", "edgeR", "tximport", "compcodeR", "airway")' in text
+    assert (
+        'PRIMARY_INSTALL_ORDER <- c("limma", "edgeR", "tximport", "compcodeR", "airway")'
+        in text
+    )
     assert "run_verifier(root, target)" in text
     assert "BiocManager::install" not in text
 
@@ -252,13 +273,19 @@ def test_verifier_has_primary_pins_and_machine_readable_contract() -> None:
     assert 'EXPECTED_R_VERSION <- "4.6.1"' in text
     assert "assert_vanilla()" in text
     assert 'EXPECTED_BIOCONDUCTOR_VERSION <- "3.23"' in text
-    assert 'EXPECTED_CONDA_PACKAGES <- c(coreutils = "9.5", zlib = "1.3.2", libuv = "1.52.1")' in text
+    for package, version in {
+        "coreutils": "9.5",
+        "zlib": "1.3.2",
+        "libuv": "1.52.1",
+        "numpy": "2.4.4",
+    }.items():
+        assert f'{package} = "{version}"' in text
     assert 'Sys.getenv("CONDA_PREFIX"' in text
     assert "load_expected_namespaces(target)" in text
     assert "requireNamespace(package, quietly = TRUE, lib.loc = target)" in text
     assert '"status":"success"' in text
     assert '"status":"error"' in text
-    assert "quit(save = \"no\", status = status" in text
+    assert 'quit(save = "no", status = status' in text
     assert "jsonlite" not in text
 
 

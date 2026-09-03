@@ -146,7 +146,7 @@ def _bundle(tmp_path: Path) -> Path:
             {
                 "step": "contrast_test",
                 "dispatch": (
-                    "lfc_threshold == 0: glmQLFTest; " "lfc_threshold > 0: glmTreat"
+                    "lfc_threshold == 0: glmQLFTest; lfc_threshold > 0: glmTreat"
                 ),
             },
         ],
@@ -325,8 +325,10 @@ def test_summarize_rejects_extra_bundle_entry(tmp_path: Path) -> None:
     run_dir = _bundle(tmp_path)
     (run_dir / "unmanifested.txt").write_text("unsafe\n", encoding="utf-8")
 
-    with pytest.raises(InputIntegrityError, match="exactly the five"):
+    with pytest.raises(InputIntegrityError) as caught:
         summarize_run(run_dir)
+
+    assert caught.value.details["unexpected_files"] == ["unmanifested.txt"]
 
 
 @pytest.mark.unit
