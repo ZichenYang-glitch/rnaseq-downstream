@@ -12,6 +12,7 @@ EXPECTED_RUNTIME <- list(
     limma = "3.68.0"
 )
 QR_TOLERANCE <- 1e-7
+ACTIVE_SCHEMA_VERSION <- "1.0"
 STATUS_VOCABULARY <- c(
     "filtered", "not_tested", "not_estimable", "failed", "tested"
 )
@@ -99,7 +100,9 @@ assert_request_envelope <- function(request) {
         "schema_version", "kind", "execution_scope", "analysis_request",
         "input_evidence", "input", "design", "contrasts"
     )
-    allowed <- c(required, "validated_input_bundle", "display_export")
+    allowed <- c(
+        required, "validated_input_bundle", "display_export", "gene_sets"
+    )
     observed <- names(request)
     if (!is.list(request) || is.null(observed) ||
         length(setdiff(required, observed)) > 0L ||
@@ -115,7 +118,8 @@ assert_request_envelope <- function(request) {
             )
         )
     }
-    if (!identical(request$schema_version, "1.0") ||
+    expected_schema <- if ("gene_sets" %in% observed) "1.1" else "1.0"
+    if (!identical(request$schema_version, expected_schema) ||
         !identical(request$kind, "edger_ql_backend_request") ||
         !is.character(request$execution_scope) ||
         length(request$execution_scope) != 1L ||
@@ -126,6 +130,7 @@ assert_request_envelope <- function(request) {
             list(reason = "backend_request_identity_invalid")
         )
     }
+    ACTIVE_SCHEMA_VERSION <<- expected_schema
     invisible(request)
 }
 
@@ -1344,6 +1349,7 @@ run_analysis <- function(request_path, output_dir) {
     runtime <- assert_runtime()
     request <- read_request(request_path)
     assert_request_envelope(request)
+    output_schema_version <- if (is.null(request$gene_sets)) "1.0" else "1.1"
     design_info <- build_design(request)
     contrasts <- build_contrasts(request, design_info)
     constructed <- construct_dge(request$input)
@@ -1404,8 +1410,21 @@ run_analysis <- function(request_path, output_dir) {
         estimability_residual = contrast$estimability_residual,
         estimability_tolerance = contrast$estimability_tolerance
     ))
+    pathway <- if (is.null(request$gene_sets)) {
+        NULL
+    } else {
+        run_pathway_tests(
+            request$gene_sets,
+            request$input,
+            gene_ids,
+            keep,
+            fit,
+            design,
+            contrasts
+        )
+    }
     analysis <- list(
-        schema_version = "1.0",
+        schema_version = output_schema_version,
         kind = "edger_ql_analysis",
         backend = "edgeR_QL",
         execution_scope = request$execution_scope,
@@ -1448,6 +1467,9 @@ run_analysis <- function(request_path, output_dir) {
         coefficient_scale = "natural_log",
         multiple_testing = "Benjamini-Hochberg within each contrast"
     )
+    if (!is.null(pathway)) {
+        analysis$pathway_analysis <- pathway$provenance
+    }
 
     if (!dir.create(output_dir, recursive = FALSE, mode = "0700")) {
         backend_abort(
@@ -1463,6 +1485,12 @@ run_analysis <- function(request_path, output_dir) {
     write_tsv(results, results_path)
     write_tsv(coefficients, coefficients_path)
     write_tsv(design_table, design_path)
+    if (!is.null(pathway)) {
+        write_tsv(
+            pathway$results,
+            file.path(output_dir, "pathway_results.tsv")
+        )
+    }
     writeLines(
         jsonlite::toJSON(
             analysis,
@@ -1478,12 +1506,15 @@ run_analysis <- function(request_path, output_dir) {
     member_paths <- c(
         "analysis.json", "coefficients.tsv", "design.tsv", "results.tsv"
     )
+    if (!is.null(pathway)) {
+        member_paths <- c(member_paths, "pathway_results.tsv")
+    }
     members <- lapply(
         member_paths,
         function(name) file_record(file.path(output_dir, name), name)
     )
     manifest <- list(
-        schema_version = "1.0",
+        schema_version = output_schema_version,
         kind = "edger_ql_backend_manifest",
         backend = "edgeR_QL",
         runtime_identity = runtime,
@@ -1505,33 +1536,42 @@ run_analysis <- function(request_path, output_dir) {
         useBytes = TRUE
     )
 
+    response_data <- list(
+        execution_scope = request$execution_scope,
+        runtime_identity = runtime,
+        input_semantics = request$input$input_semantics,
+        route_observed = constructed$route_observed,
+        design_columns = colnames(design),
+        design_rank = design_info$rank,
+        residual_df = design_info$residual_df,
+        gene_count = length(gene_ids),
+        tested_gene_count = sum(keep),
+        filtered_gene_count = sum(!keep),
+        contrasts = contrast_provenance,
+        ql_fit_parameters = list(
+            abundance.trend = TRUE,
+            robust = TRUE,
+            winsor.tail.p = c(0.05, 0.1),
+            legacy = FALSE,
+            top.proportion = NULL,
+            resolved_top.proportion = fit$top.proportion,
+            keep.unit.mat = FALSE
+        ),
+        display_export = display_export
+    )
+    if (!is.null(pathway)) {
+        response_data$pathway_analysis <- list(
+            enabled = TRUE,
+            result_row_count = nrow(pathway$results),
+            gene_set_count = length(unique(pathway$results$gene_set_id)),
+            methods = c("limma_mroast", "limma_fry", "limma_camera")
+        )
+    }
     emit_document(list(
-        schema_version = "1.0",
+        schema_version = output_schema_version,
         status = "success",
         backend = "edgeR_QL",
-        data = list(
-            execution_scope = request$execution_scope,
-            runtime_identity = runtime,
-            input_semantics = request$input$input_semantics,
-            route_observed = constructed$route_observed,
-            design_columns = colnames(design),
-            design_rank = design_info$rank,
-            residual_df = design_info$residual_df,
-            gene_count = length(gene_ids),
-            tested_gene_count = sum(keep),
-            filtered_gene_count = sum(!keep),
-            contrasts = contrast_provenance,
-            ql_fit_parameters = list(
-                abundance.trend = TRUE,
-                robust = TRUE,
-                winsor.tail.p = c(0.05, 0.1),
-                legacy = FALSE,
-                top.proportion = NULL,
-                resolved_top.proportion = fit$top.proportion,
-                keep.unit.mat = FALSE
-            ),
-            display_export = display_export
-        ),
+        data = response_data,
         warnings = list(),
         errors = list(),
         artifacts = c(members, list(file_record(manifest_path, "backend_manifest.json")))
@@ -1539,6 +1579,24 @@ run_analysis <- function(request_path, output_dir) {
 }
 
 main <- function() {
+    file_argument <- grep(
+        "^--file=", commandArgs(trailingOnly = FALSE), value = TRUE
+    )
+    if (length(file_argument) != 1L) {
+        backend_abort(
+            "BACKEND_FAILED",
+            "The locked backend script location cannot be resolved.",
+            list(reason = "backend_script_path_unavailable")
+        )
+    }
+    script_path <- normalizePath(
+        sub("^--file=", "", file_argument[[1L]]), mustWork = TRUE
+    )
+    source(
+        file.path(dirname(script_path), "pathway_tests.R"),
+        local = .GlobalEnv,
+        encoding = "UTF-8"
+    )
     arguments <- commandArgs(trailingOnly = TRUE)
     if (length(arguments) != 2L) {
         backend_abort(
@@ -1555,7 +1613,7 @@ tryCatch(
     main(),
     rnaseq_backend_error = function(error) {
         emit_document(list(
-            schema_version = "1.0",
+            schema_version = ACTIVE_SCHEMA_VERSION,
             status = "error",
             backend = "edgeR_QL",
             data = NULL,
@@ -1571,7 +1629,7 @@ tryCatch(
     },
     error = function(error) {
         emit_document(list(
-            schema_version = "1.0",
+            schema_version = ACTIVE_SCHEMA_VERSION,
             status = "error",
             backend = "edgeR_QL",
             data = NULL,

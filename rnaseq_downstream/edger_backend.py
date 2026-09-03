@@ -38,6 +38,7 @@ from .provenance import has_control_characters, read_json_object
 
 BACKEND_NAME = "edgeR_QL"
 BACKEND_OUTPUT_SCHEMA_VERSION = "1.0"
+PATHWAY_BACKEND_OUTPUT_SCHEMA_VERSION = "1.1"
 _EXPECTED_RUNTIME = {
     "R": "4.6.1",
     "Bioconductor": "3.23",
@@ -52,7 +53,7 @@ _OUTPUT_MEMBERS = {
     "design.tsv",
     "results.tsv",
 }
-_ALL_OUTPUT_FILES = _OUTPUT_MEMBERS | {"backend_manifest.json"}
+_PATHWAY_OUTPUT_MEMBERS = _OUTPUT_MEMBERS | {"pathway_results.tsv"}
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 
@@ -485,6 +486,48 @@ def _materialize_validated_inputs(
     return rewritten, snapshots, metadata_values
 
 
+def _materialize_gene_set_inputs(
+    specification: Mapping[str, Any],
+    input_root: Path,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Recapture frozen pathway inputs into the private R workspace.
+
+    The public request parser has already captured and verified each declared
+    digest.  This second pass deliberately hashes the same source stream that
+    is copied for R, closing the request-load-to-execution race.
+    """
+
+    rewritten = copy.deepcopy(dict(specification))
+    snapshots: list[dict[str, Any]] = []
+    destinations = {
+        "gmt": ("pathways.gmt", input_root / "gene-sets" / "sets.gmt"),
+        "annotation": (
+            "pathways.annotation",
+            input_root / "gene-sets" / "annotation.tsv",
+        ),
+    }
+    for source_kind, (role, destination) in destinations.items():
+        source = rewritten.get(source_kind)
+        if not isinstance(source, Mapping):
+            raise InputIntegrityError(
+                "The normalized pathway source evidence is incomplete.",
+                details={"source_kind": source_kind},
+            )
+        artifact = {
+            "role": role,
+            "path": source.get("path"),
+            "sha256": source.get("sha256"),
+            "size_bytes": source.get("size_bytes"),
+        }
+        record, _ = _copy_evidence_snapshot(artifact, destination)
+        record["private_relative_path"] = str(
+            PurePosixPath("gene-sets") / destination.name
+        )
+        snapshots.append(record)
+        rewritten[source_kind]["path"] = str(destination)
+    return rewritten, snapshots
+
+
 def _capture_declared_benchmark_file(
     source: str | Path,
     destination: Path,
@@ -659,6 +702,7 @@ def _invoke_r(
     *,
     rscript: str | Path,
     r_library: str | Path | None,
+    expected_schema_version: str = BACKEND_OUTPUT_SCHEMA_VERSION,
 ) -> tuple[dict[str, Any], str]:
     environment = os.environ.copy()
     if r_library is not None:
@@ -714,10 +758,17 @@ def _invoke_r(
             returncode=completed.returncode,
             stderr=completed.stderr,
         )
-    if response.get("backend") != BACKEND_NAME:
+    if (
+        response.get("backend") != BACKEND_NAME
+        or response.get("schema_version") != expected_schema_version
+    ):
         raise BackendFailedError(
             "The R backend response has an unexpected identity.",
-            details={"observed_backend": response.get("backend")},
+            details={
+                "observed_backend": response.get("backend"),
+                "observed_schema_version": response.get("schema_version"),
+                "expected_schema_version": expected_schema_version,
+            },
         )
     return response, completed.stderr
 
@@ -786,7 +837,18 @@ def _verify_result_stage(
     result_stage: Path,
     *,
     execution_scope: str,
+    expected_schema_version: str = BACKEND_OUTPUT_SCHEMA_VERSION,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if expected_schema_version == BACKEND_OUTPUT_SCHEMA_VERSION:
+        expected_members = _OUTPUT_MEMBERS
+    elif expected_schema_version == PATHWAY_BACKEND_OUTPUT_SCHEMA_VERSION:
+        expected_members = _PATHWAY_OUTPUT_MEMBERS
+    else:
+        raise BackendFailedError(
+            "The expected backend output schema is unsupported.",
+            details={"expected_schema_version": expected_schema_version},
+        )
+    expected_files = expected_members | {"backend_manifest.json"}
     try:
         entries = list(result_stage.iterdir())
     except OSError as error:
@@ -799,12 +861,12 @@ def _verify_result_stage(
     unsafe = sorted(
         entry.name for entry in entries if entry.is_symlink() or not entry.is_file()
     )
-    if names != _ALL_OUTPUT_FILES or unsafe:
+    if names != expected_files or unsafe:
         raise BackendFailedError(
             "The R backend output inventory is incomplete or unsafe.",
             details={
-                "missing_files": sorted(_ALL_OUTPUT_FILES - names),
-                "unexpected_files": sorted(names - _ALL_OUTPUT_FILES),
+                "missing_files": sorted(expected_files - names),
+                "unexpected_files": sorted(names - expected_files),
                 "unsafe_files": unsafe,
             },
         )
@@ -813,7 +875,7 @@ def _verify_result_stage(
         manifest_path, role="backend_manifest"
     )
     if (
-        manifest.get("schema_version") != BACKEND_OUTPUT_SCHEMA_VERSION
+        manifest.get("schema_version") != expected_schema_version
         or manifest.get("kind") != "edger_ql_backend_manifest"
         or manifest.get("backend") != BACKEND_NAME
         or manifest.get("execution_scope") != execution_scope
@@ -835,7 +897,7 @@ def _verify_result_stage(
                 details={"member_index": index},
             )
         name = member.get("path")
-        if name not in _OUTPUT_MEMBERS or name in observed_members:
+        if name not in expected_members or name in observed_members:
             raise BackendFailedError(
                 "A backend manifest member path is invalid.",
                 details={"member_index": index, "path": name},
@@ -859,13 +921,13 @@ def _verify_result_stage(
                     if name.endswith(".json")
                     else "text/tab-separated-values"
                 ),
-                "schema_version": BACKEND_OUTPUT_SCHEMA_VERSION,
+                "schema_version": expected_schema_version,
             }
         )
-    if observed_members != _OUTPUT_MEMBERS:
+    if observed_members != expected_members:
         raise BackendFailedError(
             "The backend manifest omits required outputs.",
-            details={"missing_members": sorted(_OUTPUT_MEMBERS - observed_members)},
+            details={"missing_members": sorted(expected_members - observed_members)},
         )
     _hash_and_fsync_output(manifest_path)
     artifacts.append(
@@ -876,12 +938,20 @@ def _verify_result_stage(
             "sha256": manifest_digest,
             "size_bytes": manifest_size,
             "media_type": "application/json",
-            "schema_version": BACKEND_OUTPUT_SCHEMA_VERSION,
+            "schema_version": expected_schema_version,
         }
     )
     analysis, _, _ = _capture_output_json(
         result_stage / "analysis.json", role="edger_analysis"
     )
+    if analysis.get("schema_version") != expected_schema_version:
+        raise BackendFailedError(
+            "The analysis document schema does not match the requested backend schema.",
+            details={
+                "observed_schema_version": analysis.get("schema_version"),
+                "expected_schema_version": expected_schema_version,
+            },
+        )
     _fsync_directory(result_stage)
     return analysis, sorted(artifacts, key=lambda item: item["relative_path"])
 
@@ -983,6 +1053,26 @@ def _execute_document(
     r_library: str | Path | None,
     display_configuration: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    expected_schema_version = str(document.get("schema_version", ""))
+    if expected_schema_version not in {
+        BACKEND_OUTPUT_SCHEMA_VERSION,
+        PATHWAY_BACKEND_OUTPUT_SCHEMA_VERSION,
+    }:
+        raise InvalidRequestError(
+            "The private backend request schema is unsupported.",
+            details={"schema_version": expected_schema_version},
+        )
+    has_gene_sets = "gene_sets" in document
+    if has_gene_sets != (
+        expected_schema_version == PATHWAY_BACKEND_OUTPUT_SCHEMA_VERSION
+    ):
+        raise InvalidRequestError(
+            "The private backend schema and pathway request presence disagree.",
+            details={
+                "schema_version": expected_schema_version,
+                "gene_sets_present": has_gene_sets,
+            },
+        )
     request_path = workspace / "backend_request.json"
     result_stage = workspace / "results"
     display_logcpm = workspace / "display-logcpm.tsv"
@@ -994,10 +1084,13 @@ def _execute_document(
         result_stage,
         rscript=rscript,
         r_library=r_library,
+        expected_schema_version=expected_schema_version,
     )
     execution_scope = document["execution_scope"]
     analysis, artifacts = _verify_result_stage(
-        result_stage, execution_scope=execution_scope
+        result_stage,
+        execution_scope=execution_scope,
+        expected_schema_version=expected_schema_version,
     )
     response_data = response.get("data")
     if not isinstance(response_data, Mapping):
@@ -1013,7 +1106,12 @@ def _execute_document(
             display_dir=result_stage / "display",
             logcpm_path=display_logcpm,
             core_dir=result_stage,
-            core_artifacts=artifacts,
+            core_artifacts=[
+                item
+                for item in artifacts
+                if item.get("relative_path")
+                in (_OUTPUT_MEMBERS | {"backend_manifest.json"})
+            ],
             backend_document=document,
             backend_data=response_data,
             configuration=display_configuration,
@@ -1045,7 +1143,7 @@ def _execute_document(
     for artifact in artifacts:
         artifact["path"] = str(target / artifact.pop("relative_path"))
     return {
-        "schema_version": BACKEND_OUTPUT_SCHEMA_VERSION,
+        "schema_version": expected_schema_version,
         "status": "success",
         "backend": BACKEND_NAME,
         "execution_scope": execution_scope,
@@ -1096,6 +1194,13 @@ def run_edger_ql(
             validated, input_root
         )
         document = validated.to_backend_document()
+        if validated.gene_sets is not None:
+            rewritten_gene_sets, pathway_snapshots = _materialize_gene_set_inputs(
+                validated.gene_sets, input_root
+            )
+            document["schema_version"] = PATHWAY_BACKEND_OUTPUT_SCHEMA_VERSION
+            document["gene_sets"] = rewritten_gene_sets
+            snapshots.extend(pathway_snapshots)
         document.update(
             {
                 "execution_scope": "validated_p0_input",
@@ -1134,6 +1239,7 @@ def _run_edger_ql_benchmark_kernel(
     *,
     design: Mapping[str, Any],
     contrasts: Sequence[Mapping[str, Any]],
+    gene_sets: Mapping[str, Any] | None = None,
     rscript: str | Path = "Rscript",
     r_library: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -1146,6 +1252,14 @@ def _run_edger_ql_benchmark_kernel(
 
     normalized_design = _parse_design(design)
     normalized_contrasts = _parse_contrasts(list(contrasts))
+    normalized_gene_sets: dict[str, Any] | None = None
+    if gene_sets is not None:
+        from .gene_sets import parse_gene_sets_request
+
+        normalized_gene_sets = parse_gene_sets_request(
+            gene_sets,
+            request_path=Path.cwd() / "private-benchmark-request.json",
+        )
     target = _resolve_output(output_dir)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -1182,6 +1296,23 @@ def _run_edger_ql_benchmark_kernel(
             sample_order=sample_order,
             design_terms=normalized_design["terms"],
         )
+        gene_set_identity = None
+        if normalized_gene_sets is not None:
+            gene_set_identity = {
+                "gmt": {
+                    key: value
+                    for key, value in normalized_gene_sets["gmt"].items()
+                    if key not in {"path", "declared_path"}
+                },
+                "annotation": {
+                    key: value
+                    for key, value in normalized_gene_sets["annotation"].items()
+                    if key not in {"path", "declared_path"}
+                },
+                "minimum_tested_genes": normalized_gene_sets[
+                    "minimum_tested_genes"
+                ],
+            }
         invocation_identity = hashlib.sha256(
             _canonical_bytes(
                 {
@@ -1189,11 +1320,16 @@ def _run_edger_ql_benchmark_kernel(
                     "metadata_sha256": metadata_record["sha256"],
                     "design": normalized_design,
                     "contrasts": list(normalized_contrasts),
+                    "gene_sets": gene_set_identity,
                 }
             )
         ).hexdigest()
         document = {
-            "schema_version": ANALYSIS_SCHEMA_VERSION,
+            "schema_version": (
+                PATHWAY_BACKEND_OUTPUT_SCHEMA_VERSION
+                if normalized_gene_sets is not None
+                else ANALYSIS_SCHEMA_VERSION
+            ),
             "kind": "edger_ql_backend_request",
             "execution_scope": "backend_kernel_only",
             "analysis_request": {
@@ -1225,6 +1361,14 @@ def _run_edger_ql_benchmark_kernel(
             "design": normalized_design,
             "contrasts": [dict(item) for item in normalized_contrasts],
         }
+        if normalized_gene_sets is not None:
+            rewritten_gene_sets, pathway_snapshots = _materialize_gene_set_inputs(
+                normalized_gene_sets, input_root
+            )
+            document["gene_sets"] = rewritten_gene_sets
+            document["input_evidence"]["r_input_snapshots"].extend(
+                pathway_snapshots
+            )
         result = _execute_document(
             document,
             target,

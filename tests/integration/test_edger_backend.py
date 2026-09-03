@@ -463,6 +463,7 @@ def _analysis_request(
     bundle: Path,
     *,
     display: dict[str, object] | None = None,
+    gene_sets: dict[str, object] | None = None,
 ) -> Path:
     request: dict[str, object] = {
         "schema_version": "1.1" if display is not None else "1.0",
@@ -472,7 +473,44 @@ def _analysis_request(
     }
     if display is not None:
         request["display"] = display
+    if gene_sets is not None:
+        request["gene_sets"] = gene_sets
     return _write_json(root / "analysis-request.json", request)
+
+
+def _pathway_configuration(root: Path) -> dict[str, object]:
+    annotation = _write(
+        root / "pathways" / "annotation.tsv",
+        "gene_id\tsymbol\n"
+        + "\n".join(f"gene_{index}\tS{index}" for index in range(1, 41))
+        + "\n",
+    )
+    gmt = _write(
+        root / "pathways" / "sets.gmt",
+        "SET_UP\tup fixture\t"
+        + "\t".join(f"S{index}" for index in range(1, 9))
+        + "\nSET_NULL\tnull fixture\t"
+        + "\t".join(f"S{index}" for index in range(20, 31))
+        + "\nSET_SMALL\tretained below minimum\tS1\n",
+    )
+    return {
+        "gmt": {
+            "path": str(gmt),
+            "sha256": _sha256(gmt),
+            "collection": "public-integration-fixture",
+            "version": "1",
+            "identifier_type": "symbol",
+        },
+        "annotation": {
+            "path": str(annotation),
+            "sha256": _sha256(annotation),
+            "name": "public-integration-fixture",
+            "version": "1",
+            "gene_id_column": "gene_id",
+            "symbol_column": "symbol",
+        },
+        "minimum_tested_genes": 5,
+    }
 
 
 def _validated_featurecounts_bundle(root: Path, *, layout: str) -> Path:
@@ -619,6 +657,66 @@ def test_locked_v11_display_keeps_de_tables_byte_identical_to_v10(
 
     for name in ("results.tsv", "coefficients.tsv", "design.tsv"):
         assert (display_output / name).read_bytes() == (core_output / name).read_bytes()
+
+
+def test_locked_public_pathway_run_is_atomic_audited_and_de_invariant(
+    tmp_path: Path,
+) -> None:
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / "public-pathways"
+    bundle = _validated_featurecounts_bundle(root, layout="combined_matrix")
+    core_output = root / "v1.0-results"
+    pathway_output = root / "v1.1-pathway-results"
+
+    run_edger_ql(
+        _analysis_request(root, bundle),
+        core_output,
+        rscript=rscript,
+        r_library=r_library,
+    )
+    completed = run_edger_ql(
+        _analysis_request(
+            root,
+            bundle,
+            display=_display_configuration(),
+            gene_sets=_pathway_configuration(root),
+        ),
+        pathway_output,
+        rscript=rscript,
+        r_library=r_library,
+    )
+
+    assert completed["schema_version"] == "1.1"
+    assert completed["data"]["pathway_analysis"] == {
+        "enabled": True,
+        "result_row_count": 15,
+        "gene_set_count": 3,
+        "methods": ["limma_mroast", "limma_fry", "limma_camera"],
+    }
+    assert {item.name for item in pathway_output.iterdir()} == (
+        _CORE_OUTPUT_NAMES | {"pathway_results.tsv", "display"}
+    )
+    source_roles = {
+        item["role"]
+        for item in completed["analysis"]["input_evidence"]["r_input_snapshots"]
+    }
+    assert {"pathways.gmt", "pathways.annotation"} <= source_roles
+    for name in ("results.tsv", "coefficients.tsv", "design.tsv"):
+        assert (pathway_output / name).read_bytes() == (core_output / name).read_bytes()
+
+    summary = summarize_run(pathway_output)
+    assert summary["schema_version"] == "1.1"
+    assert summary["status"] == "verified_complete"
+    assert summary["pathways"]["gene_set_count"] == 3
+    assert summary["pathways"]["pathway_result_row_count"] == 15
+    assert set(summary["pathways"]["self_contained"]) == {
+        "limma_mroast",
+        "limma_fry",
+    }
+    assert set(summary["pathways"]["competitive"]) == {"limma_camera"}
+    assert any(
+        item["role"] == "pathway_results" for item in summary["artifacts"]
+    )
 
 
 def test_locked_featurecounts_display_failure_publishes_nothing(
