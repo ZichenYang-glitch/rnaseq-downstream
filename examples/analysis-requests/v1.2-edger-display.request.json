@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.2",
+  "backend": "edger_ql",
+  "validated_input_bundle": "../../evidence/example-validation-bundle",
+  "design": {
+    "intercept": true,
+    "terms": ["condition"],
+    "variables": {
+      "condition": {
+        "type": "factor",
+        "levels": ["control", "treated"]
+      }
+    }
+  },
+  "contrasts": [
+    {
+      "contrast_id": "treated_vs_control",
+      "weights": {
+        "conditiontreated": 1
+      },
+      "lfc_threshold": 0
+    }
+  ],
+  "display": {
+    "fdr_threshold": 0.05,
+    "pca_top_n": 500,
+    "pca_components": [1, 2]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.2",
+  "backend": "deseq2",
+  "validated_input_bundle": "../../evidence/example-validation-bundle",
+  "design": {
+    "intercept": true,
+    "terms": ["batch", "condition"],
+    "variables": {
+      "batch": {
+        "type": "factor",
+        "levels": ["batch1", "batch2"]
+      },
+      "condition": {
+        "type": "factor",
+        "levels": ["control", "treated"]
+      }
+    }
+  },
+  "contrasts": [
+    {
+      "contrast_id": "treated_vs_control",
+      "weights": {
+        "conditiontreated": 1
+      },
+      "lfc_threshold": 0
+    }
+  ],
+  "deseq2": {
+    "test_mode": "wald",
+    "shrinkage": "apeglm"
+  }
+}

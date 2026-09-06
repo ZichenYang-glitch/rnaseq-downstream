@@ -21,7 +21,16 @@ The following review findings remain outside the current evidence-gated paths:
   their sensitivity assumptions;
 - document finite-rotation P-value granularity for mroast: with 9,999 rotations
   and `midp=false`, the smallest reported mixed or two-sided P value is
-  `1e-4`, including the consequence for BH-adjusted results.
+  `1e-4`, including the consequence for BH-adjusted results;
+- make `summarize` recompute the rank and residual degrees of freedom of a
+  DESeq2 `design.tsv`, rather than treating the backend-attested rank as an
+  internally consistent provenance field;
+- add a controlled R-side fault-injection test for a nonzero or missing apeglm
+  convergence code; synthetic result-bundle tests currently lock the
+  fail-closed publishing and verification behavior;
+- rename the P0-oriented certification workflow after the P1-DESeq2 gates are
+  added in D2, so its operational name reflects the expanded environment and
+  backend inventory.
 
-These items are outside the current P0/C2 evidence scope and require their own
-review before implementation.
+These items are outside the current P0/C2 or D1 implementation evidence scope
+and require their own review before implementation.
