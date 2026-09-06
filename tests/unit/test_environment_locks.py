@@ -1,4 +1,4 @@
-"""Fail-closed contract tests for the approved two-layer P0 runtime."""
+"""Fail-closed contract tests for the approved two-layer analysis runtime."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ SOURCE_LOCK = PROJECT_ROOT / "environment" / "r-sources.lock"
 BOOTSTRAP_SCRIPT = PROJECT_ROOT / "environment" / "bootstrap.R"
 VERIFY_SCRIPT = PROJECT_ROOT / "environment" / "verify.R"
 ENVIRONMENT_README = PROJECT_ROOT / "environment" / "README.md"
+BASELINE_RENV_LOCK = PROJECT_ROOT / "environment/snapshots/p0-c1-c2-c6b6cd9/renv.lock"
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
 
 
@@ -39,8 +40,31 @@ EXPECTED_R_PINS = {
     "limma": "3.68.0",
     "edgeR": "4.10.0",
     "tximport": "1.40.0",
+    "DESeq2": "1.52.0",
+    "apeglm": "1.34.0",
     "compcodeR": "1.48.0",
     "airway": "1.32.0",
+}
+EXPECTED_DESEQ2_CLOSURE = {
+    "BH": "1.90.0-1",
+    "BiocParallel": "1.46.0",
+    "DESeq2": "1.52.0",
+    "RcppArmadillo": "15.4.2-1",
+    "RcppEigen": "0.3.4.0.2",
+    "RcppNumerical": "0.7-0",
+    "apeglm": "1.34.0",
+    "bbmle": "1.0.26",
+    "bdsmatrix": "1.3-7",
+    "coda": "0.19-4.1",
+    "emdbook": "1.3.14",
+    "formatR": "1.14",
+    "futile.logger": "1.4.9",
+    "futile.options": "1.0.1",
+    "lambda.r": "1.2.4",
+    "mvtnorm": "1.4-2",
+    "numDeriv": "2016.8-1.1",
+    "plyr": "1.8.9",
+    "snow": "0.4-4",
 }
 EXPECTED_CONDA_CONTENT_HASH = (
     "93e7d3c507fd94ebf0fb4e0d761b03048064fbb97a9157fd21345781218f4194"
@@ -80,6 +104,20 @@ EXPECTED_SOURCE_RECORDS = {
         "role": "primary",
         "url": "https://bioconductor.org/packages/3.23/bioc/src/contrib/tximport_1.40.0.tar.gz",
         "sha256": "72841a6b2ac1f64ccb05af2d9fba4eea781596771798cefcb3a9327f9dc929f9",
+    },
+    "DESeq2": {
+        "version": "1.52.0",
+        "repository": "Bioconductor 3.23",
+        "role": "primary",
+        "url": "https://bioconductor.org/packages/3.23/bioc/src/contrib/DESeq2_1.52.0.tar.gz",
+        "sha256": "8c91699286336350e66eec132ce6fdf5bb4af78e2a4d015a5a61224f62a95984",
+    },
+    "apeglm": {
+        "version": "1.34.0",
+        "repository": "Bioconductor 3.23",
+        "role": "primary",
+        "url": "https://bioconductor.org/packages/3.23/bioc/src/contrib/apeglm_1.34.0.tar.gz",
+        "sha256": "78aae4deb507580a491204f5a9462dc154d48e96899c4f1a55a9205aea6d481a",
     },
     "compcodeR": {
         "version": "1.48.0",
@@ -224,6 +262,28 @@ def test_renv_lock_pins_complete_bioconductor_closure() -> None:
     assert all(record.get("Version") for record in lock["Packages"].values())
     for package, version in EXPECTED_R_PINS.items():
         assert lock["Packages"][package]["Version"] == version
+    for package, version in EXPECTED_DESEQ2_CLOSURE.items():
+        assert lock["Packages"][package]["Version"] == version
+    assert len(lock["Packages"]) == 131
+    assert "ashr" not in lock["Packages"]
+    assert lock["Packages"]["DESeq2"]["Source"] == "Bioconductor"
+    assert lock["Packages"]["apeglm"]["Source"] == "Bioconductor"
+
+
+@pytest.mark.unit
+def test_renv_expansion_preserves_every_baseline_record() -> None:
+    baseline = json.loads(BASELINE_RENV_LOCK.read_text(encoding="utf-8"))
+    current = json.loads(RENV_LOCK.read_text(encoding="utf-8"))
+
+    assert len(baseline["Packages"]) == 112
+    assert baseline["R"] == current["R"]
+    assert baseline["Bioconductor"] == current["Bioconductor"]
+    assert set(current["Packages"]) - set(baseline["Packages"]) == set(
+        EXPECTED_DESEQ2_CLOSURE
+    )
+    assert set(baseline["Packages"]) <= set(current["Packages"])
+    for package, record in baseline["Packages"].items():
+        assert current["Packages"][package] == record
 
 
 @pytest.mark.unit
@@ -257,9 +317,12 @@ def test_bootstrap_is_noninteractive_checksum_gated_and_ordered() -> None:
     assert 'TARGET_LIBRARY_MARKER <- ".rnaseq-downstream-p0-library"' in text
     assert "refusing to clean it" in text
     assert (
-        'PRIMARY_INSTALL_ORDER <- c("limma", "edgeR", "tximport", "compcodeR", "airway")'
+        '"limma", "edgeR", "tximport", "DESeq2", "apeglm", "compcodeR", "airway"'
         in text
     )
+    assert 'DESeq2 = "1.52.0"' in text
+    assert 'apeglm = "1.34.0"' in text
+    assert "ashr" not in text
     assert "run_verifier(root, target)" in text
     assert "BiocManager::install" not in text
 
@@ -294,7 +357,7 @@ def test_environment_documentation_uses_reviewed_generation_command() -> None:
     text = ENVIRONMENT_README.read_text(encoding="utf-8")
 
     assert "research\n+preview" not in text  # Guard against patch artifacts.
-    assert "not evidence that the analysis\npath is certified" in text
+    assert "not\nevidence that the analysis path is certified" in text
     assert "--metadata input_md5" in text
     assert "--metadata input_sha" in text
     assert "--platform linux-64" in text
@@ -304,3 +367,6 @@ def test_environment_documentation_uses_reviewed_generation_command() -> None:
     assert "Rscript --vanilla environment/verify.R" in text
     assert "focused runtime smoke check" in text
     assert "not a complete post-hoc audit" in text
+    assert "DESeq2 1.52.0 and apeglm 1.34.0" in text
+    assert "preserves every one\nof the previous 112 package records" in text
+    assert "`ashr` is intentionally absent" in text

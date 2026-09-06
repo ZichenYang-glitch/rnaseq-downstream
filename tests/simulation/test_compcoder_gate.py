@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 from pathlib import Path
 import subprocess
 import sys
 
 import pytest
+
+from scripts.benchmark.evidence_resolver import verify_archived_implementation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNNER = PROJECT_ROOT / "scripts/benchmark/run_compcoder_gate.py"
@@ -67,12 +68,7 @@ def test_archived_compcoder_report_is_passing_evidence() -> None:
     assert report["status"] == "pass"
     assert report["metrics"]["scope"] == "backend_kernel"  # type: ignore[index]
     assert all(item["passed"] for item in report["assertions"])  # type: ignore[union-attr]
-    recorded = {item["name"]: item for item in report["implementation"]}  # type: ignore[union-attr]
-    assert set(recorded) == set(IMPLEMENTATION_PATHS)
-    for name, path in IMPLEMENTATION_PATHS.items():
-        payload = path.read_bytes()
-        assert recorded[name]["sha256"] == hashlib.sha256(payload).hexdigest()
-        assert recorded[name]["size_bytes"] == len(payload)
+    verify_archived_implementation(report["implementation"], IMPLEMENTATION_PATHS)
     serialized = ARCHIVED_REPORT.read_text(encoding="utf-8")
     assert "/tmp/" not in serialized
     assert "/home/" not in serialized

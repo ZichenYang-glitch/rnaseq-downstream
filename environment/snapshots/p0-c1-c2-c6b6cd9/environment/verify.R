@@ -1,6 +1,6 @@
 #!/usr/bin/env -S Rscript --vanilla
 
-# Verify the primary locked runtime contract and emit one compact JSON object.
+# Verify the primary P0 runtime contract and emit one compact JSON object.
 
 TARGET_LIBRARY_ENV <- "RNASEQ_P0_R_LIBRARY"
 EXPECTED_R_VERSION <- "4.6.1"
@@ -18,8 +18,6 @@ EXPECTED_PACKAGES <- c(
   limma = "3.68.0",
   edgeR = "4.10.0",
   tximport = "1.40.0",
-  DESeq2 = "1.52.0",
-  apeglm = "1.34.0",
   compcodeR = "1.48.0",
   airway = "1.32.0"
 )

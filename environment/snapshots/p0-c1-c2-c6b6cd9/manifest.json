@@ -1,0 +1,26 @@
+{
+  "schema_version": "rnaseq-downstream-environment-snapshot-v1",
+  "snapshot_id": "p0-c1-c2-c6b6cd9",
+  "source_revision": "c6b6cd970c1a0c6807145dd01033505efae60215",
+  "immutability": "append_only",
+  "files": [
+    {
+      "source_path": "renv.lock",
+      "snapshot_path": "renv.lock",
+      "sha256": "8d8ca4c7b9ab411150f207846d098cad799dcefe7219696a06e3ebf17cbe19ff",
+      "size_bytes": 268638
+    },
+    {
+      "source_path": "environment/r-sources.lock",
+      "snapshot_path": "environment/r-sources.lock",
+      "sha256": "0632d66bd4aee5cc00e7ee33f6061df0db3803843bd5bc98a91fb83c82e30f4d",
+      "size_bytes": 1312
+    },
+    {
+      "source_path": "environment/verify.R",
+      "snapshot_path": "environment/verify.R",
+      "sha256": "0f13c98256143ae1febcb3750cd96b1c9d897d8a5cdfee1481018e12b1fc3a7e",
+      "size_bytes": 8494
+    }
+  ]
+}

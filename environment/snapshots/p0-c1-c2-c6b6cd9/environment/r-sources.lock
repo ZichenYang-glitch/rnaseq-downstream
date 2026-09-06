@@ -4,7 +4,5 @@ BiocManager	1.30.27	CRAN	bootstrap	https://cran.r-project.org/src/contrib/BiocMa
 edgeR	4.10.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/Archive/edgeR/edgeR_4.10.0.tar.gz	b02f02639e08ba978ecc0420a770121922f683ff3ebd0645df44c1e67b42a061
 limma	3.68.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/Archive/limma/limma_3.68.0.tar.gz	e58fc11741b3c1a3aa311f26101ef6a67404ce92fd4d1cecc89b27aa6f70e095
 tximport	1.40.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/tximport_1.40.0.tar.gz	72841a6b2ac1f64ccb05af2d9fba4eea781596771798cefcb3a9327f9dc929f9
-DESeq2	1.52.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/DESeq2_1.52.0.tar.gz	8c91699286336350e66eec132ce6fdf5bb4af78e2a4d015a5a61224f62a95984
-apeglm	1.34.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/apeglm_1.34.0.tar.gz	78aae4deb507580a491204f5a9462dc154d48e96899c4f1a55a9205aea6d481a
 compcodeR	1.48.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/bioc/src/contrib/compcodeR_1.48.0.tar.gz	9890c63d8f6cb585ef9311fa888d162ebe1148809c9082d8710f39a07a013b07
 airway	1.32.0	Bioconductor 3.23	primary	https://bioconductor.org/packages/3.23/data/experiment/src/contrib/airway_1.32.0.tar.gz	829f654fc8075ac9d810574e8a8d4672e69e847c45fa2ce598d1ffbc30c7fe19

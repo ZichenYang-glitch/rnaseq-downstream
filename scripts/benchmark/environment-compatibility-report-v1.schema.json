@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ZichenYang-glitch/rnaseq-downstream/main/scripts/benchmark/environment-compatibility-report-v1.schema.json",
+  "title": "rnaseq-downstream environment compatibility report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "compatibility_id",
+    "status",
+    "baseline_snapshot",
+    "expanded_environment",
+    "permitted_implementation_changes",
+    "benchmarks",
+    "assertions"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rnaseq-downstream-environment-compatibility-report-v1"
+    },
+    "compatibility_id": {
+      "const": "p1-deseq2-environment-expansion-v1"
+    },
+    "status": {
+      "const": "pass"
+    },
+    "baseline_snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot_id", "source_revision", "manifest"],
+      "properties": {
+        "snapshot_id": {"const": "p0-c1-c2-c6b6cd9"},
+        "source_revision": {
+          "const": "c6b6cd970c1a0c6807145dd01033505efae60215"
+        },
+        "manifest": {"$ref": "#/$defs/fileRecord"}
+      }
+    },
+    "expanded_environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files"],
+      "properties": {
+        "files": {"$ref": "#/$defs/nonEmptyFileRecords"}
+      }
+    },
+    "permitted_implementation_changes": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {"enum": ["renv.lock", "r-sources.lock", "verify.R"]}
+    },
+    "benchmarks": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "benchmark_id",
+          "archived_report",
+          "expanded_environment_report",
+          "artifact_inventory",
+          "implementation_changes",
+          "runtime_metadata_changes",
+          "rebuild_metadata_changes"
+        ],
+        "properties": {
+          "benchmark_id": {"type": "string", "minLength": 1},
+          "archived_report": {"$ref": "#/$defs/fileRecord"},
+          "expanded_environment_report": {"$ref": "#/$defs/fileRecord"},
+          "artifact_inventory": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["count", "sha256"],
+            "properties": {
+              "count": {"type": "integer", "minimum": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          },
+          "implementation_changes": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "before", "after"],
+              "properties": {
+                "name": {"enum": ["renv.lock", "r-sources.lock", "verify.R"]},
+                "before": {"$ref": "#/$defs/fileRecord"},
+                "after": {"$ref": "#/$defs/fileRecord"}
+              }
+            }
+          },
+          "runtime_metadata_changes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field", "reason", "before", "after", "conda_lock"],
+              "properties": {
+                "field": {"const": "rscript_sha256"},
+                "reason": {"const": "locked_conda_prefix_relocation"},
+                "before": {"$ref": "#/$defs/sha256"},
+                "after": {"$ref": "#/$defs/sha256"},
+                "conda_lock": {"$ref": "#/$defs/fileRecord"}
+              }
+            }
+          },
+          "rebuild_metadata_changes": {
+            "type": "array",
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "input_name",
+                "reason",
+                "before",
+                "after",
+                "source_archive"
+              ],
+              "properties": {
+                "input_name": {
+                  "enum": ["airway/DESCRIPTION", "compcodeR/DESCRIPTION"]
+                },
+                "reason": {"const": "installed_DESCRIPTION_build_metadata"},
+                "before": {"$ref": "#/$defs/fileRecord"},
+                "after": {"$ref": "#/$defs/fileRecord"},
+                "source_archive": {"$ref": "#/$defs/sourceArchive"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "passed", "observed", "requirement"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "passed": {"const": true},
+          "observed": {},
+          "requirement": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "fileRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size_bytes"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "nonEmptyFileRecords": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/fileRecord"}
+    },
+    "sourceArchive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "version", "repository", "role", "url", "sha256"],
+      "properties": {
+        "package": {"enum": ["airway", "compcodeR"]},
+        "version": {"type": "string", "minLength": 1},
+        "repository": {"type": "string", "minLength": 1},
+        "role": {"const": "primary"},
+        "url": {"type": "string", "pattern": "^https://"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

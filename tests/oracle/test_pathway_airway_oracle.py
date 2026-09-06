@@ -13,6 +13,8 @@ from types import ModuleType
 
 import pytest
 
+from scripts.benchmark.evidence_resolver import verify_archived_implementation
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNNER = PROJECT_ROOT / "scripts/benchmark/run_airway_pathway_oracle.py"
 ARCHIVED_REPORT = Path(__file__).with_name("pathway-airway-benchmark-report.json")
@@ -115,12 +117,7 @@ def test_archived_pathway_airway_report_is_passing_evidence() -> None:
         "mroast_seed": 1729,
         "relative_tolerance": 1e-6,
     }
-    recorded = {item["name"]: item for item in report["implementation"]}  # type: ignore[union-attr]
-    assert set(recorded) == set(IMPLEMENTATION_PATHS)
-    for name, path in IMPLEMENTATION_PATHS.items():
-        payload = path.read_bytes()
-        assert recorded[name]["sha256"] == hashlib.sha256(payload).hexdigest()
-        assert recorded[name]["size_bytes"] == len(payload)
+    verify_archived_implementation(report["implementation"], IMPLEMENTATION_PATHS)
     inputs = {item["name"] for item in report["inputs"]}  # type: ignore[union-attr]
     assert inputs == {
         "airway/DESCRIPTION",

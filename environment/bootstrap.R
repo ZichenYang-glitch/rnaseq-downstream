@@ -1,6 +1,6 @@
 #!/usr/bin/env -S Rscript --vanilla
 
-# Bootstrap the P0 R library from the reviewed lock artifacts.
+# Bootstrap the locked R library from the reviewed lock artifacts.
 #
 # This script deliberately has no "install latest" fallback.  The bootstrap
 # and primary packages come only from r-sources.lock; every other package is
@@ -13,13 +13,17 @@ EXPECTED_CONDA_PACKAGES <- c(zlib = "1.3.2", libuv = "1.52.1")
 TARGET_LIBRARY_ENV <- "RNASEQ_P0_R_LIBRARY"
 TARGET_LIBRARY_MARKER <- ".rnaseq-downstream-p0-library"
 BOOTSTRAP_PACKAGES <- c("renv", "BiocManager")
-PRIMARY_INSTALL_ORDER <- c("limma", "edgeR", "tximport", "compcodeR", "airway")
+PRIMARY_INSTALL_ORDER <- c(
+  "limma", "edgeR", "tximport", "DESeq2", "apeglm", "compcodeR", "airway"
+)
 EXPECTED_SOURCE_VERSIONS <- c(
   renv = "1.2.4",
   BiocManager = "1.30.27",
   limma = "3.68.0",
   edgeR = "4.10.0",
   tximport = "1.40.0",
+  DESeq2 = "1.52.0",
+  apeglm = "1.34.0",
   compcodeR = "1.48.0",
   airway = "1.32.0"
 )
@@ -223,7 +227,7 @@ read_source_manifest <- function(path) {
   if (nrow(manifest) != length(expected_names) ||
       !setequal(manifest$package, expected_names) ||
       anyDuplicated(manifest$package)) {
-    fail("r-sources.lock must contain exactly the reviewed P0 source packages.")
+    fail("r-sources.lock must contain exactly the reviewed source packages.")
   }
   expected_roles <- c(
     renv = "bootstrap",
@@ -231,6 +235,8 @@ read_source_manifest <- function(path) {
     limma = "primary",
     edgeR = "primary",
     tximport = "primary",
+    DESeq2 = "primary",
+    apeglm = "primary",
     compcodeR = "primary",
     airway = "primary"
   )
@@ -251,6 +257,8 @@ read_source_manifest <- function(path) {
     limma = "Bioconductor 3.23",
     edgeR = "Bioconductor 3.23",
     tximport = "Bioconductor 3.23",
+    DESeq2 = "Bioconductor 3.23",
+    apeglm = "Bioconductor 3.23",
     compcodeR = "Bioconductor 3.23",
     airway = "Bioconductor 3.23"
   )

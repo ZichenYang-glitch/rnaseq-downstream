@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -11,6 +10,8 @@ import sys
 from types import ModuleType
 
 import pytest
+
+from scripts.benchmark.evidence_resolver import verify_archived_implementation
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNNER = PROJECT_ROOT / "scripts/benchmark/run_airway_oracle.py"
@@ -166,12 +167,7 @@ def test_archived_airway_report_is_passing_evidence() -> None:
     for name, (digest, size) in P0_NUMERIC_ARTIFACTS.items():
         assert artifacts[name]["sha256"] == digest
         assert artifacts[name]["size_bytes"] == size
-    recorded = {item["name"]: item for item in report["implementation"]}  # type: ignore[union-attr]
-    assert set(recorded) == set(IMPLEMENTATION_PATHS)
-    for name, path in IMPLEMENTATION_PATHS.items():
-        payload = path.read_bytes()
-        assert recorded[name]["sha256"] == hashlib.sha256(payload).hexdigest()
-        assert recorded[name]["size_bytes"] == len(payload)
+    verify_archived_implementation(report["implementation"], IMPLEMENTATION_PATHS)
     serialized = ARCHIVED_REPORT.read_text(encoding="utf-8")
     assert "/tmp/" not in serialized
     assert "/home/" not in serialized
