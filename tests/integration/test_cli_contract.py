@@ -189,8 +189,19 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
     assert isinstance(document["data"], dict)
     assert document["errors"] == []
     assert document["data"]["toolkit"]["maturity"] == "research_preview"
-    assert document["data"]["analysis_request_schema_versions"] == ["1.0", "1.1"]
+    assert document["data"]["analysis_request_schema_versions"] == [
+        "1.0",
+        "1.1",
+        "1.2",
+    ]
     assert document["data"]["certified_analysis_paths"] == []
+    ungated = document["data"]["implemented_ungated_analysis_paths"]
+    assert [path["path_id"] for path in ungated] == [
+        "deseq2_p1_v1_gate_pending"
+    ]
+    assert ungated[0]["gate_status"] == "pending_D2"
+    assert ungated[0]["evidence_gated"] is False
+    assert ungated[0]["benchmark_evidence"] == []
     paths = document["data"]["evidence_gated_analysis_paths"]
     assert [path["path_id"] for path in paths] == [
         "edger_ql_p0_v1",
@@ -219,6 +230,10 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
     ]
     assert displays[0]["analysis_path_id"] == "edger_ql_p0_v1"
     assert displays[0]["analysis_request_schema_version"] == "1.1"
+    assert displays[0]["compatible_analysis_request_schema_versions"] == [
+        "1.1",
+        "1.2",
+    ]
     assert displays[0]["statistical_role"] == "display_only_no_inference"
     assert displays[0]["plot_types"] == {
         "volcano": "one_per_contrast",
@@ -377,13 +392,16 @@ def test_public_summarize_missing_bundle_is_structured_json(
 
 
 @pytest.mark.integration
-def test_packaged_r_backend_is_readable_outside_checkout_cwd(tmp_path: Path) -> None:
+@pytest.mark.parametrize("resource_name", ["edger_ql.R", "deseq2.R"])
+def test_packaged_r_backend_is_readable_outside_checkout_cwd(
+    tmp_path: Path, resource_name: str
+) -> None:
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     source = (
         "import hashlib, importlib.resources, json; "
         "resource = importlib.resources.files('rnaseq_downstream').joinpath("
-        "'r_scripts', 'edger_ql.R'); "
+        f"'r_scripts', '{resource_name}'); "
         "content = resource.read_bytes(); "
         "print(json.dumps({'name': resource.name, 'size': len(content), "
         "'sha256': hashlib.sha256(content).hexdigest()}))"
@@ -404,7 +422,7 @@ def test_packaged_r_backend_is_readable_outside_checkout_cwd(tmp_path: Path) -> 
     assert completed.stderr == ""
     assert completed.stdout.count("\n") == 1
     document = json.loads(completed.stdout)
-    assert document["name"] == "edger_ql.R"
+    assert document["name"] == resource_name
     assert document["size"] > 1000
     assert len(document["sha256"]) == 64
 

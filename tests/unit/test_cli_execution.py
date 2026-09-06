@@ -25,13 +25,38 @@ from rnaseq_downstream.errors import (
 def test_capabilities_exposes_v11_display_and_gated_pathways() -> None:
     data = cli._capabilities(SimpleNamespace())
 
-    assert data["analysis_request_schema_versions"] == ["1.0", "1.1"]
+    assert data["analysis_request_schema_versions"] == ["1.0", "1.1", "1.2"]
+    assert data["implemented_ungated_analysis_paths"] == [
+        {
+            "path_id": "deseq2_p1_v1_gate_pending",
+            "maturity": "research_preview",
+            "analysis_request_schema_version": "1.2",
+            "backend": "DESeq2",
+            "runtime": {
+                "R": "4.6.1",
+                "Bioconductor": "3.23",
+                "DESeq2": "1.52.0",
+                "apeglm": "1.34.0",
+            },
+            "test_modes": ["wald", "lrt"],
+            "shrinkage": ["none", "apeglm_coef_only"],
+            "benchmark_evidence": [],
+            "gate_status": "pending_D2",
+            "evidence_gated": False,
+            "publication_grade_claim": False,
+        }
+    ]
     assert [path["path_id"] for path in data["evidence_gated_analysis_paths"]] == [
         "edger_ql_p0_v1",
         "edger_ql_p0_v1_limma_gene_sets_v1",
     ]
     pathway = data["evidence_gated_analysis_paths"][1]
     assert pathway["parent_path_id"] == "edger_ql_p0_v1"
+    assert pathway["analysis_request_schema_version"] == "1.1"
+    assert pathway["compatible_analysis_request_schema_versions"] == [
+        "1.1",
+        "1.2",
+    ]
     assert pathway["self_contained"] == {
         "primary": "limma_fry",
         "corroborative": "limma_mroast",
@@ -46,6 +71,7 @@ def test_capabilities_exposes_v11_display_and_gated_pathways() -> None:
             "maturity": "research_preview",
             "analysis_path_id": "edger_ql_p0_v1",
             "analysis_request_schema_version": "1.1",
+            "compatible_analysis_request_schema_versions": ["1.1", "1.2"],
             "invocation": "optional_same_run",
             "statistical_role": "display_only_no_inference",
             "output_location": "display/",
@@ -233,7 +259,15 @@ def test_run_forwards_backend_logs_to_stderr_and_returns_artifacts(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from rnaseq_downstream import edger_backend
+    from rnaseq_downstream import analysis_contract_v12, edger_backend
+
+    monkeypatch.setattr(
+        analysis_contract_v12,
+        "load_analysis_request",
+        lambda _request: SimpleNamespace(
+            backend="edger_ql", request_schema_version="1.1"
+        ),
+    )
 
     monkeypatch.setattr(
         edger_backend,
@@ -310,7 +344,15 @@ def test_run_forwards_backend_logs_to_stderr_and_returns_artifacts(
 def test_run_exposes_pathway_completion_only_when_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from rnaseq_downstream import edger_backend
+    from rnaseq_downstream import analysis_contract_v12, edger_backend
+
+    monkeypatch.setattr(
+        analysis_contract_v12,
+        "load_analysis_request",
+        lambda _request: SimpleNamespace(
+            backend="edger_ql", request_schema_version="1.1"
+        ),
+    )
 
     pathway_completion = {
         "enabled": True,
@@ -350,6 +392,107 @@ def test_run_exposes_pathway_completion_only_when_present(
         result.data["scope"]["analysis_path"]
         == "edger_ql_p0_v1_limma_gene_sets_v1"
     )
+
+
+@pytest.mark.unit
+def test_run_routes_v12_edger_to_extension_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from rnaseq_downstream import analysis_contract_v12, edger_backend_v12
+
+    arguments = SimpleNamespace(request="request.json")
+    expected = cli._CommandResult(data={"selected": "edger_v12"})
+    monkeypatch.setattr(
+        analysis_contract_v12,
+        "load_analysis_request",
+        lambda _request: SimpleNamespace(
+            backend="edger_ql", request_schema_version="1.2"
+        ),
+    )
+
+    def fake_handler(
+        observed: SimpleNamespace,
+        *,
+        runner: object = None,
+    ) -> cli._CommandResult:
+        assert observed is arguments
+        assert runner is edger_backend_v12.run_edger_ql_v12
+        return expected
+
+    monkeypatch.setattr(cli, "_run_edger", fake_handler)
+
+    assert cli._run(arguments) is expected
+
+
+@pytest.mark.unit
+def test_run_dispatches_deseq2_without_claiming_gate_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from rnaseq_downstream import analysis_contract_v12, deseq2_backend
+
+    monkeypatch.setattr(
+        analysis_contract_v12,
+        "load_analysis_request",
+        lambda _request: SimpleNamespace(backend="deseq2"),
+    )
+    monkeypatch.setattr(
+        deseq2_backend,
+        "run_deseq2",
+        lambda *_args, **_kwargs: {
+            "status": "success",
+            "backend": "DESeq2",
+            "execution_scope": "validated_p1_deseq2_input",
+            "output_dir": "/results",
+            "publication_status": "durability_confirmed",
+            "plan_id": "a" * 64,
+            "analysis_request_sha256": "b" * 64,
+            "data": {
+                "runtime_identity": {"DESeq2": "1.52.0"},
+                "input_semantics": "featurecounts_integer",
+                "route_observed": {
+                    "constructor": "DESeq2::DESeqDataSetFromMatrix"
+                },
+                "design_columns": ["(Intercept)", "conditiontreated"],
+                "design_rank": 2,
+                "residual_df": 4,
+                "gene_count": 100,
+                "result_status_counts": {"tested": 100},
+                "test": {"mode": "wald", "reduced": None},
+                "defaults": {"fit_type_requested": "parametric"},
+                "contrasts": [{"contrast_id": "treated_vs_control"}],
+                "reporting_effect": [
+                    {
+                        "contrast_id": "treated_vs_control",
+                        "role": "tested_contrast",
+                    }
+                ],
+            },
+            "warnings": [],
+            "artifacts": [{"role": "results", "path": "/results/results.tsv"}],
+            "backend_stderr": "DESeq2 diagnostic\n",
+        },
+    )
+
+    envelope, exit_code = cli._execute(
+        [
+            "run",
+            "--request",
+            "analysis-request.json",
+            "--output-dir",
+            "results",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code is ExitCode.SUCCESS
+    assert envelope["data"]["backend"] == "DESeq2"
+    scope = envelope["data"]["scope"]
+    assert scope["analysis_path"] == "deseq2_p1_v1_gate_pending"
+    assert scope["evidence_status"] == "implementation_complete_gate_pending"
+    assert scope["benchmark_scope"] == "not_run_D2_pending"
+    assert scope["publication_grade_claim"] is False
+    assert captured.err == "DESeq2 diagnostic\n"
 
 
 @pytest.mark.unit

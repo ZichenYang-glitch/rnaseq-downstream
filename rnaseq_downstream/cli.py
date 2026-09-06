@@ -111,7 +111,7 @@ def _build_parser() -> _JsonArgumentParser:
 
     run = subparsers.add_parser(
         "run",
-        help="Execute the evidence-gated edgeR v4 QL analysis path.",
+        help="Execute the explicitly selected locked analysis backend.",
     )
     run.command_name = "run"
     run.add_argument("--request", required=True, metavar="ANALYSIS_REQUEST.json")
@@ -122,7 +122,7 @@ def _build_parser() -> _JsonArgumentParser:
 
     summarize = subparsers.add_parser(
         "summarize",
-        help="Verify and summarize a complete public edgeR result bundle.",
+        help="Verify and summarize a complete supported result bundle.",
     )
     summarize.command_name = "summarize"
     summarize.add_argument("--run-dir", required=True, metavar="DIRECTORY")
@@ -132,7 +132,7 @@ def _build_parser() -> _JsonArgumentParser:
 
 
 def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
-    from .analysis_contract import ANALYSIS_REQUEST_SCHEMA_VERSIONS
+    from .analysis_contract_v12 import ANALYSIS_REQUEST_SCHEMA_VERSIONS
 
     return {
         "toolkit": {
@@ -159,7 +159,7 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
             "capabilities": "implemented",
             "inspect": "implemented_input_semantics_read_only",
             "validate": "implemented_input_semantics_only",
-            "run": "implemented_edger_ql_p0",
+            "run": "implemented_explicit_single_backend_dispatch",
             "summarize": "implemented_verified_result_bundle",
         },
         "validated_input_semantics": [
@@ -169,6 +169,26 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
         ],
         "analysis_request_schema_versions": list(ANALYSIS_REQUEST_SCHEMA_VERSIONS),
         "certified_analysis_paths": [],
+        "implemented_ungated_analysis_paths": [
+            {
+                "path_id": "deseq2_p1_v1_gate_pending",
+                "maturity": "research_preview",
+                "analysis_request_schema_version": "1.2",
+                "backend": "DESeq2",
+                "runtime": {
+                    "R": "4.6.1",
+                    "Bioconductor": "3.23",
+                    "DESeq2": "1.52.0",
+                    "apeglm": "1.34.0",
+                },
+                "test_modes": ["wald", "lrt"],
+                "shrinkage": ["none", "apeglm_coef_only"],
+                "benchmark_evidence": [],
+                "gate_status": "pending_D2",
+                "evidence_gated": False,
+                "publication_grade_claim": False,
+            }
+        ],
         "evidence_gated_analysis_paths": [
             {
                 "path_id": "edger_ql_p0_v1",
@@ -199,6 +219,7 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
                 "maturity": "research_preview",
                 "execution_scope": "validated_p0_input",
                 "analysis_request_schema_version": "1.1",
+                "compatible_analysis_request_schema_versions": ["1.1", "1.2"],
                 "backend": "edgeR_QL_plus_limma_gene_set_tests",
                 "input_sources": "frozen_local_gmt_plus_annotation",
                 "self_contained": {
@@ -206,9 +227,7 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
                     "corroborative": "limma_mroast",
                 },
                 "competitive": {"supplementary": "limma_camera"},
-                "multiple_testing": (
-                    "BH_within_contrast_method_and_hypothesis"
-                ),
+                "multiple_testing": ("BH_within_contrast_method_and_hypothesis"),
                 "benchmark_evidence": [
                     "airway-limma-gene-set-same-engine-v1",
                     "compcoder-limma-self-contained-fdr-tpr-v1",
@@ -225,6 +244,7 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
                 "maturity": "research_preview",
                 "analysis_path_id": "edger_ql_p0_v1",
                 "analysis_request_schema_version": "1.1",
+                "compatible_analysis_request_schema_versions": ["1.1", "1.2"],
                 "invocation": "optional_same_run",
                 "statistical_role": "display_only_no_inference",
                 "output_location": "display/",
@@ -300,9 +320,34 @@ def _validate(arguments: argparse.Namespace) -> _CommandResult:
 
 
 def _run(arguments: argparse.Namespace) -> _CommandResult:
-    from .edger_backend import run_edger_ql
+    from .analysis_contract_v12 import load_analysis_request
 
-    completed = run_edger_ql(
+    validated = load_analysis_request(arguments.request)
+    if validated.backend == "deseq2":
+        return _run_deseq2(arguments)
+    if validated.backend != "edger_ql":
+        raise InvalidRequestError(
+            "The analysis request selected an unsupported backend.",
+            details={"backend": validated.backend},
+        )
+    if validated.request_schema_version == "1.2":
+        from .edger_backend_v12 import run_edger_ql_v12
+
+        return _run_edger(arguments, runner=run_edger_ql_v12)
+    return _run_edger(arguments)
+
+
+def _run_edger(
+    arguments: argparse.Namespace,
+    *,
+    runner: Callable[..., dict[str, Any]] | None = None,
+) -> _CommandResult:
+    if runner is None:
+        from .edger_backend import run_edger_ql
+
+        runner = run_edger_ql
+
+    completed = runner(
         arguments.request,
         arguments.output_dir,
         rscript=arguments.rscript,
@@ -367,10 +412,76 @@ def _run(arguments: argparse.Namespace) -> _CommandResult:
             raise BackendFailedError(
                 "The edgeR adapter returned invalid pathway completion data."
             )
-        data["scope"]["analysis_path"] = (
-            "edger_ql_p0_v1_limma_gene_sets_v1"
-        )
+        data["scope"]["analysis_path"] = "edger_ql_p0_v1_limma_gene_sets_v1"
         data["pathways"] = dict(pathway_analysis)
+    return _CommandResult(
+        data=data,
+        warnings=tuple(completed.get("warnings", ())),
+        artifacts=tuple(completed.get("artifacts", ())),
+    )
+
+
+def _run_deseq2(arguments: argparse.Namespace) -> _CommandResult:
+    from .deseq2_backend import run_deseq2
+
+    completed = run_deseq2(
+        arguments.request,
+        arguments.output_dir,
+        rscript=arguments.rscript,
+        r_library=arguments.r_library,
+    )
+    if (
+        completed.get("status") != "success"
+        or completed.get("execution_scope") != "validated_p1_deseq2_input"
+        or completed.get("backend") != "DESeq2"
+    ):
+        raise BackendFailedError(
+            "The DESeq2 adapter returned an incompatible completion record."
+        )
+    backend_stderr = completed.get("backend_stderr", "")
+    if not isinstance(backend_stderr, str):
+        raise BackendFailedError("The DESeq2 adapter returned invalid backend logs.")
+    if backend_stderr:
+        sys.stderr.write(backend_stderr)
+        sys.stderr.flush()
+    backend_data = completed.get("data")
+    if not isinstance(backend_data, Mapping):
+        raise BackendFailedError("The DESeq2 adapter omitted its completion data.")
+    data = {
+        "scope": {
+            "analysis_path": "deseq2_p1_v1_gate_pending",
+            "execution_scope": "validated_p1_deseq2_input",
+            "input_semantics": "passed",
+            "design": "passed",
+            "backend": "passed",
+            "evidence_status": "implementation_complete_gate_pending",
+            "benchmark_scope": "not_run_D2_pending",
+            "input_route_evidence": (
+                "validation_contract_plus_locked_integration_tests"
+            ),
+            "combined_manifest_origin_authentication": "self_attested_not_proven",
+            "publication_grade_claim": False,
+        },
+        "backend": completed["backend"],
+        "output_dir": completed["output_dir"],
+        "publication_status": completed["publication_status"],
+        "plan_id": completed["plan_id"],
+        "analysis_request_sha256": completed["analysis_request_sha256"],
+        "runtime_identity": backend_data.get("runtime_identity"),
+        "input_semantics": backend_data.get("input_semantics"),
+        "route_observed": backend_data.get("route_observed"),
+        "design": {
+            "columns": backend_data.get("design_columns"),
+            "rank": backend_data.get("design_rank"),
+            "residual_df": backend_data.get("residual_df"),
+        },
+        "gene_count": backend_data.get("gene_count"),
+        "result_status_counts": backend_data.get("result_status_counts"),
+        "test": backend_data.get("test"),
+        "defaults": backend_data.get("defaults"),
+        "contrasts": backend_data.get("contrasts"),
+        "reporting_effect": backend_data.get("reporting_effect"),
+    }
     return _CommandResult(
         data=data,
         warnings=tuple(completed.get("warnings", ())),

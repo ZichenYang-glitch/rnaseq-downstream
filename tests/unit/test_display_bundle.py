@@ -27,6 +27,7 @@ from rnaseq_downstream.display_bundle import (  # noqa: E402
     verify_display_bundle,
 )
 from rnaseq_downstream.errors import (  # noqa: E402
+    BackendFailedError,
     InputIntegrityError,
     QCValidationError,
 )
@@ -282,7 +283,12 @@ def _make_sources(
     )
 
 
-def _build(root: Path, *, display_name: str = "display") -> _SyntheticBundle:
+def _build(
+    root: Path,
+    *,
+    display_name: str = "display",
+    analysis_request_schema_version: str = "1.1",
+) -> _SyntheticBundle:
     (
         core_dir,
         logcpm_path,
@@ -302,6 +308,7 @@ def _build(root: Path, *, display_name: str = "display") -> _SyntheticBundle:
         backend_document=backend_document,
         backend_data=backend_data,
         configuration=configuration,
+        analysis_request_schema_version=analysis_request_schema_version,
     )
     return _SyntheticBundle(
         core_dir=core_dir,
@@ -481,10 +488,33 @@ def test_build_display_bundle_reproduces_source_values_and_metadata(
 
 def test_display_build_is_byte_deterministic(tmp_path: Path) -> None:
     first = _build(tmp_path / "first")
-    second = _build(tmp_path / "second")
+    second = _build(
+        tmp_path / "second", analysis_request_schema_version="1.1"
+    )
 
     assert first.build_artifacts == second.build_artifacts
     assert _display_bytes(first.display_dir) == _display_bytes(second.display_dir)
+
+
+def test_display_bundle_binds_v12_edger_request_schema(tmp_path: Path) -> None:
+    bundle = _build(tmp_path, analysis_request_schema_version="1.2")
+
+    assert (
+        _manifest(bundle.display_dir)["source_bundle"][
+            "analysis_request_schema_version"
+        ]
+        == "1.2"
+    )
+    assert _verify(bundle)["summary"]["status"] == "verified_complete"
+
+
+def test_display_bundle_rejects_unsupported_public_request_schema(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        BackendFailedError, match="request schema identity is incompatible"
+    ):
+        _build(tmp_path, analysis_request_schema_version="1.0")
 
 
 def test_verify_display_bundle_accepts_reproducible_bundle(tmp_path: Path) -> None:

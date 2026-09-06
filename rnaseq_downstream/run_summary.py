@@ -1,4 +1,4 @@
-"""Fail-closed reader for a published edgeR P0 result bundle."""
+"""Fail-closed reader for published evidence-gated result bundles."""
 
 from __future__ import annotations
 
@@ -27,6 +27,8 @@ _MANIFESTED_FILES = _CORE_FILES - {"backend_manifest.json"}
 _PATHWAY_RESULT_FILE = "pathway_results.tsv"
 _PATHWAY_FILES = _CORE_FILES | {_PATHWAY_RESULT_FILE}
 _PATHWAY_MANIFESTED_FILES = _PATHWAY_FILES - {"backend_manifest.json"}
+_DESEQ2_FILES = _CORE_FILES
+_DESEQ2_MANIFESTED_FILES = _DESEQ2_FILES - {"backend_manifest.json"}
 _EXPECTED_RUNTIME = {
     "R": "4.6.1",
     "Bioconductor": "3.23",
@@ -35,6 +37,16 @@ _EXPECTED_RUNTIME = {
     "tximport": "1.40.0",
     "limma": "3.68.0",
 }
+_DESEQ2_EXPECTED_RUNTIME = {
+    "R": "4.6.1",
+    "Bioconductor": "3.23",
+    "BiocVersion_package": "3.23.1",
+    "DESeq2": "1.52.0",
+    "apeglm": "1.34.0",
+    "tximport": "1.40.0",
+}
+_DESEQ2_SCHEMA_VERSION = "1.0"
+_DESEQ2_EXECUTION_SCOPE = "validated_p1_deseq2_input"
 _RESULT_HEADER = [
     "gene_id",
     "contrast_id",
@@ -51,6 +63,33 @@ _RESULT_HEADER = [
     "lfc_threshold",
 ]
 _COEFFICIENT_HEADER = ["gene_id", "status", "coefficient", "estimate", "scale"]
+_DESEQ2_RESULT_HEADER = [
+    "gene_id",
+    "contrast_id",
+    "status",
+    "status_reason",
+    "baseMean",
+    "logFC",
+    "unshrunk_logFC",
+    "lfcSE",
+    "statistic",
+    "statistic_type",
+    "statistic_hypothesis",
+    "PValue",
+    "FDR",
+    "fdr_basis",
+    "test_method",
+    "lfc_threshold",
+    "shrinkage_method",
+]
+_DESEQ2_COEFFICIENT_HEADER = [
+    "gene_id",
+    "status",
+    "status_reason",
+    "coefficient",
+    "estimate",
+    "scale",
+]
 _DESIGN_HEADER = ["sample_id", "coefficient", "value"]
 _PATHWAY_HEADER = [
     "contrast_id",
@@ -440,6 +479,90 @@ def _verify_manifest(
         raise _integrity(
             "The backend manifest omits required result members.",
             missing_members=sorted(manifested_files - observed),
+        )
+
+
+def _verify_deseq2_manifest(
+    manifest: Mapping[str, Any],
+    captured: Mapping[str, tuple[bytes, str, int]],
+) -> None:
+    """Verify the independent DESeq2 bundle identity and member commitments."""
+
+    _exact_keys(
+        manifest,
+        {
+            "schema_version",
+            "kind",
+            "backend",
+            "runtime_identity",
+            "execution_scope",
+            "input_evidence",
+            "members",
+        },
+        context="DESeq2 backend manifest",
+    )
+    if manifest.get("execution_scope") == "backend_kernel_only":
+        raise InvalidRequestError(
+            "Public summarize refuses private benchmark-kernel output.",
+            details={"execution_scope": "backend_kernel_only"},
+        )
+    identity = {
+        "schema_version": manifest.get("schema_version"),
+        "kind": manifest.get("kind"),
+        "backend": manifest.get("backend"),
+        "execution_scope": manifest.get("execution_scope"),
+        "runtime_identity": manifest.get("runtime_identity"),
+    }
+    expected = {
+        "schema_version": _DESEQ2_SCHEMA_VERSION,
+        "kind": "deseq2_backend_manifest",
+        "backend": "DESeq2",
+        "execution_scope": _DESEQ2_EXECUTION_SCOPE,
+        "runtime_identity": _DESEQ2_EXPECTED_RUNTIME,
+    }
+    if identity != expected:
+        raise _integrity(
+            "The DESeq2 backend manifest identity is incompatible.",
+            observed=identity,
+        )
+    _verify_input_evidence(manifest.get("input_evidence"))
+    members = manifest.get("members")
+    if not isinstance(members, list):
+        raise _integrity("The DESeq2 manifest member inventory is not an array.")
+    observed: set[str] = set()
+    for index, member in enumerate(members):
+        if not isinstance(member, Mapping):
+            raise _integrity(
+                "A DESeq2 manifest member is not an object.", member_index=index
+            )
+        _exact_keys(
+            member,
+            {"path", "sha256", "size_bytes"},
+            context=f"DESeq2 backend manifest member {index}",
+        )
+        name = member.get("path")
+        digest = member.get("sha256")
+        size = member.get("size_bytes")
+        if name not in _DESEQ2_MANIFESTED_FILES or name in observed:
+            raise _integrity(
+                "A DESeq2 manifest member path is invalid.",
+                member_index=index,
+                path=name,
+            )
+        if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
+            raise _integrity("A DESeq2 manifest member digest is invalid.", path=name)
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise _integrity("A DESeq2 manifest member size is invalid.", path=name)
+        observed.add(name)
+        _, actual_digest, actual_size = captured[name]
+        if digest != actual_digest or size != actual_size:
+            raise _integrity(
+                "A DESeq2 result member does not match its manifest.", path=name
+            )
+    if observed != _DESEQ2_MANIFESTED_FILES:
+        raise _integrity(
+            "The DESeq2 manifest omits required result members.",
+            missing_members=sorted(_DESEQ2_MANIFESTED_FILES - observed),
         )
 
 
@@ -1087,6 +1210,1474 @@ def _verify_results(
             }
         )
     return summaries, genes, gene_filter_status
+
+
+def _verify_deseq2_defaults(
+    value: Any, *, design: Mapping[str, Any]
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise _integrity("The DESeq2 defaults evidence is invalid.")
+    expected_keys = {
+        "fit_type_requested",
+        "fit_type_resolved",
+        "size_factor_type",
+        "beta_prior",
+        "min_replicates_for_replace",
+        "independent_filtering",
+        "cooks_cutoff",
+        "alpha",
+        "p_adjust_method",
+        "results_alt_hypothesis",
+        "use_t",
+        "minmu",
+        "parallel",
+        "outlier_replacement_count",
+    }
+    _exact_keys(value, expected_keys, context="DESeq2 defaults evidence")
+    expected_fixed = {
+        "fit_type_requested": "parametric",
+        "size_factor_type": "ratio",
+        "beta_prior": False,
+        "min_replicates_for_replace": 7,
+        "independent_filtering": True,
+        "alpha": 0.1,
+        "p_adjust_method": "BH",
+        "results_alt_hypothesis": "greaterAbs",
+        "use_t": False,
+        "minmu": 0.5,
+        "parallel": False,
+    }
+    if any(value.get(key) != expected for key, expected in expected_fixed.items()):
+        raise _integrity("The DESeq2 defaults evidence is incompatible.")
+    if value.get("fit_type_resolved") not in ("parametric", "local"):
+        raise _integrity("The resolved DESeq2 fit type is invalid.")
+    replacement_count = value.get("outlier_replacement_count")
+    if (
+        isinstance(replacement_count, bool)
+        or not isinstance(replacement_count, int)
+        or replacement_count < 0
+    ):
+        raise _integrity("The DESeq2 outlier-replacement count is invalid.")
+    cooks = value.get("cooks_cutoff")
+    if not isinstance(cooks, Mapping):
+        raise _integrity("The DESeq2 Cook's cutoff evidence is invalid.")
+    _exact_keys(
+        cooks,
+        {
+            "requested",
+            "resolved_f_quantile",
+            "resolved_value",
+            "numerator_df",
+            "denominator_df",
+        },
+        context="DESeq2 Cook's cutoff evidence",
+    )
+    numerator = cooks.get("numerator_df")
+    denominator = cooks.get("denominator_df")
+    if (
+        cooks.get("requested") != "automatic"
+        or _finite_json_number(
+            cooks.get("resolved_f_quantile"),
+            context="DESeq2 Cook's F quantile",
+            nonnegative=True,
+        )
+        != 0.99
+        or _finite_json_number(
+            cooks.get("resolved_value"),
+            context="DESeq2 resolved Cook's cutoff",
+            nonnegative=True,
+        )
+        <= 0
+        or isinstance(numerator, bool)
+        or not isinstance(numerator, int)
+        or numerator != design.get("rank")
+        or isinstance(denominator, bool)
+        or not isinstance(denominator, int)
+        or denominator != design.get("residual_df")
+    ):
+        raise _integrity("The DESeq2 Cook's cutoff evidence is inconsistent.")
+    return dict(value)
+
+
+def _verify_deseq2_test(value: Any, *, design: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise _integrity("The DESeq2 test evidence is invalid.")
+    mode = value.get("mode")
+    shrinkage = value.get("shrinkage")
+    if shrinkage not in ("none", "apeglm"):
+        raise _integrity("The DESeq2 shrinkage policy is invalid.")
+    if mode == "wald":
+        _exact_keys(
+            value, {"mode", "shrinkage", "reduced"}, context="DESeq2 Wald test"
+        )
+        if value.get("reduced") is not None:
+            raise _integrity("A DESeq2 Wald test cannot carry a reduced design.")
+        return {"mode": mode, "shrinkage": shrinkage, "reduced": None}
+    if mode != "lrt":
+        raise _integrity("The DESeq2 test mode is invalid.")
+    _exact_keys(
+        value,
+        {
+            "mode",
+            "shrinkage",
+            "reduced",
+        },
+        context="DESeq2 LRT test",
+    )
+    reduced = value.get("reduced")
+    if not isinstance(reduced, Mapping):
+        raise _integrity("The DESeq2 LRT reduced-design evidence is invalid.")
+    _exact_keys(
+        reduced,
+        {
+            "intercept",
+            "terms",
+            "columns",
+            "rank",
+            "residual_df",
+            "nesting_residual",
+            "nesting_tolerance",
+        },
+        context="DESeq2 LRT reduced design",
+    )
+    if reduced.get("intercept") is not design.get("intercept"):
+        raise _integrity("The DESeq2 reduced design changes the intercept policy.")
+    raw_terms = reduced.get("terms")
+    terms = [raw_terms] if isinstance(raw_terms, str) else raw_terms
+    raw_full_terms = design.get("terms")
+    full_terms = [raw_full_terms] if isinstance(raw_full_terms, str) else raw_full_terms
+    if (
+        not isinstance(terms, list)
+        or not all(isinstance(term, str) and term for term in terms)
+        or len(set(terms)) != len(terms)
+        or not isinstance(full_terms, list)
+        or not set(terms) < set(full_terms)
+    ):
+        raise _integrity("The DESeq2 reduced-design terms are not a strict subset.")
+    raw_columns = reduced.get("columns")
+    columns = [raw_columns] if isinstance(raw_columns, str) else raw_columns
+    full_columns = design.get("columns")
+    if isinstance(full_columns, str):
+        full_columns = [full_columns]
+    if (
+        not isinstance(columns, list)
+        or not columns
+        or not all(isinstance(column, str) and column for column in columns)
+        or len(set(columns)) != len(columns)
+        or not isinstance(full_columns, list)
+        or not set(columns).issubset(set(full_columns))
+    ):
+        raise _integrity("The DESeq2 reduced-design columns are invalid.")
+    reduced_rank = reduced.get("rank")
+    full_rank = design.get("rank")
+    reduced_residual_df = reduced.get("residual_df")
+    sample_count = design.get("sample_count")
+    if (
+        isinstance(reduced_rank, bool)
+        or not isinstance(reduced_rank, int)
+        or isinstance(full_rank, bool)
+        or not isinstance(full_rank, int)
+        or reduced_rank != len(columns)
+        or reduced_rank <= 0
+        or reduced_rank >= full_rank
+        or isinstance(reduced_residual_df, bool)
+        or not isinstance(reduced_residual_df, int)
+        or isinstance(sample_count, bool)
+        or not isinstance(sample_count, int)
+        or reduced_residual_df != sample_count - reduced_rank
+    ):
+        raise _integrity("The DESeq2 LRT ranks or degrees of freedom are inconsistent.")
+    residual = _finite_json_number(
+        reduced.get("nesting_residual"),
+        context="DESeq2 reduced-design nesting residual",
+        nonnegative=True,
+    )
+    tolerance = _finite_json_number(
+        reduced.get("nesting_tolerance"),
+        context="DESeq2 reduced-design nesting tolerance",
+        nonnegative=True,
+    )
+    if tolerance <= 0 or residual > tolerance:
+        raise _integrity("The DESeq2 reduced design is not demonstrably nested.")
+    return {
+        "mode": mode,
+        "shrinkage": shrinkage,
+        "reduced": {
+            **dict(reduced),
+            "terms": list(terms),
+            "nesting_residual": residual,
+            "nesting_tolerance": tolerance,
+        },
+        "degrees_of_freedom": full_rank - reduced_rank,
+    }
+
+
+def _verify_deseq2_contrasts(
+    value: Any,
+    *,
+    design_columns: Sequence[str],
+    test: Mapping[str, Any],
+    defaults: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise _integrity("The DESeq2 contrast inventory is invalid.")
+    if test["mode"] == "lrt" and len(value) != 1:
+        raise _integrity("A DESeq2 LRT bundle must contain exactly one reporting contrast.")
+    expected_keys = {
+        "contrast_id",
+        "weights",
+        "lfc_threshold",
+        "test_method",
+        "alternative_hypothesis",
+        "independent_filter_threshold",
+        "independent_filter_theta",
+        "independent_filter_alpha",
+        "cooks_filter_applied",
+        "cooks_cutoff",
+        "coefficient_name",
+        "shrinkage_method",
+        "shrinkage_nonconvergence_count",
+        "estimability_residual",
+        "estimability_tolerance",
+    }
+    identifiers: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            raise _integrity("A DESeq2 contrast record is invalid.", contrast_index=index)
+        _exact_keys(item, expected_keys, context=f"DESeq2 contrast {index}")
+        identifier = item.get("contrast_id")
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or has_control_characters(identifier)
+            or identifier in identifiers
+        ):
+            raise _integrity("DESeq2 contrast identifiers are invalid or duplicated.")
+        weights = item.get("weights")
+        if not isinstance(weights, Mapping) or not weights:
+            raise _integrity("A DESeq2 contrast has no coefficient weights.", contrast_id=identifier)
+        parsed_weights: dict[str, float] = {}
+        for coefficient, weight in weights.items():
+            if not isinstance(coefficient, str) or coefficient not in design_columns:
+                raise _integrity(
+                    "A DESeq2 contrast names an unknown design coefficient.",
+                    contrast_id=identifier,
+                    coefficient=coefficient,
+                )
+            parsed_weights[coefficient] = _finite_json_number(
+                weight, context=f"DESeq2 contrast {identifier} weight {coefficient}"
+            )
+        if not any(parsed_weights.values()):
+            raise _integrity("A DESeq2 contrast has identically zero weights.", contrast_id=identifier)
+        threshold = _finite_json_number(
+            item.get("lfc_threshold"),
+            context=f"DESeq2 contrast {identifier} LFC threshold",
+            nonnegative=True,
+        )
+        if test["mode"] == "lrt":
+            expected_method = "DESeq2::results_LRT"
+            expected_alternative = "full_vs_reduced_omnibus"
+            if threshold != 0:
+                raise _integrity("A DESeq2 LRT cannot carry an LFC threshold.")
+        elif threshold > 0:
+            expected_method = "DESeq2::results_Wald_greaterAbs"
+            expected_alternative = "greaterAbs"
+        else:
+            expected_method = "DESeq2::results_Wald"
+            expected_alternative = "greaterAbs_at_zero_equivalent_two_sided"
+        if (
+            item.get("test_method") != expected_method
+            or item.get("alternative_hypothesis") != expected_alternative
+        ):
+            raise _integrity("A DESeq2 contrast test identity is incompatible.", contrast_id=identifier)
+        filter_threshold = _finite_json_number(
+            item.get("independent_filter_threshold"),
+            context=f"DESeq2 contrast {identifier} filter threshold",
+            nonnegative=True,
+        )
+        filter_theta = _finite_json_number(
+            item.get("independent_filter_theta"),
+            context=f"DESeq2 contrast {identifier} filter theta",
+            nonnegative=True,
+        )
+        filter_alpha = _finite_json_number(
+            item.get("independent_filter_alpha"),
+            context=f"DESeq2 contrast {identifier} independent-filter alpha",
+            nonnegative=True,
+        )
+        cooks_cutoff = _finite_json_number(
+            item.get("cooks_cutoff"),
+            context=f"DESeq2 contrast {identifier} Cook's cutoff",
+            nonnegative=True,
+        )
+        shrinkage = item.get("shrinkage_method")
+        coefficient_name = item.get("coefficient_name")
+        if shrinkage not in ("none", "apeglm"):
+            raise _integrity("A DESeq2 contrast has an invalid shrinkage method.")
+        if shrinkage == "none" and coefficient_name is not None:
+            raise _integrity("An unshrunk DESeq2 contrast cannot name an apeglm coefficient.")
+        if shrinkage == "apeglm" and (
+            not isinstance(coefficient_name, str) or not coefficient_name
+        ):
+            raise _integrity("An apeglm contrast must name one DESeq2 coefficient.")
+        shrinkage_nonconvergence_count = item.get(
+            "shrinkage_nonconvergence_count"
+        )
+        if (
+            isinstance(shrinkage_nonconvergence_count, bool)
+            or not isinstance(shrinkage_nonconvergence_count, int)
+            or shrinkage_nonconvergence_count < 0
+            or (shrinkage == "none" and shrinkage_nonconvergence_count != 0)
+        ):
+            raise _integrity(
+                "A DESeq2 shrinkage convergence count is invalid.",
+                contrast_id=identifier,
+            )
+        residual = _finite_json_number(
+            item.get("estimability_residual"),
+            context=f"DESeq2 contrast {identifier} estimability residual",
+            nonnegative=True,
+        )
+        tolerance = _finite_json_number(
+            item.get("estimability_tolerance"),
+            context=f"DESeq2 contrast {identifier} estimability tolerance",
+            nonnegative=True,
+        )
+        if (
+            filter_theta > 1
+            or filter_alpha != 0.1
+            or item.get("cooks_filter_applied") is not True
+            or not math.isclose(
+                cooks_cutoff,
+                defaults["cooks_cutoff"]["resolved_value"],
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+            or tolerance <= 0
+            or residual > tolerance
+        ):
+            raise _integrity("A DESeq2 contrast carries invalid diagnostic thresholds.")
+        identifiers.add(identifier)
+        normalized.append(
+            {
+                "contrast_id": identifier,
+                "weights": parsed_weights,
+                "lfc_threshold": threshold,
+                "test_method": expected_method,
+                "alternative_hypothesis": expected_alternative,
+                "independent_filter_threshold": filter_threshold,
+                "independent_filter_theta": filter_theta,
+                "independent_filter_alpha": filter_alpha,
+                "cooks_filter_applied": True,
+                "cooks_cutoff": cooks_cutoff,
+                "coefficient_name": coefficient_name,
+                "shrinkage_method": shrinkage,
+                "shrinkage_nonconvergence_count": (
+                    shrinkage_nonconvergence_count
+                ),
+                "estimability_residual": residual,
+                "estimability_tolerance": tolerance,
+            }
+        )
+    if len({item["shrinkage_method"] for item in normalized}) != 1:
+        raise _integrity("DESeq2 shrinkage policy changes across reporting contrasts.")
+    if normalized[0]["shrinkage_method"] != test["shrinkage"]:
+        raise _integrity("DESeq2 contrasts disagree with the declared shrinkage policy.")
+    return normalized
+
+
+def _verify_deseq2_reporting_effects(
+    value: Any,
+    *,
+    contrasts: Sequence[Mapping[str, Any]],
+    coefficient_mapping: Mapping[str, str],
+    test: Mapping[str, Any],
+) -> None:
+    if not isinstance(value, list) or len(value) != len(contrasts):
+        raise _integrity("The DESeq2 reporting-effect inventory is invalid.")
+    by_id = {item["contrast_id"]: item for item in contrasts}
+    observed: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            raise _integrity("A DESeq2 reporting-effect record is invalid.", effect_index=index)
+        _exact_keys(
+            item,
+            {"contrast_id", "role", "weights", "coefficient_name"},
+            context=f"DESeq2 reporting effect {index}",
+        )
+        identifier = item.get("contrast_id")
+        if (
+            not isinstance(identifier, str)
+            or identifier not in by_id
+            or identifier in observed
+        ):
+            raise _integrity("A DESeq2 reporting effect has an invalid contrast identity.")
+        expected_role = (
+            "reported_effect_not_lrt_hypothesis"
+            if test["mode"] == "lrt"
+            else "tested_contrast"
+        )
+        if item.get("role") != expected_role or item.get("weights") != by_id[identifier]["weights"]:
+            raise _integrity("A DESeq2 reporting effect does not match its contrast.")
+        coefficient_name = item.get("coefficient_name")
+        contrast = by_id[identifier]
+        if coefficient_name != contrast["coefficient_name"]:
+            raise _integrity("A DESeq2 reporting effect changes its coefficient name.")
+        if contrast["shrinkage_method"] == "apeglm":
+            weights = contrast["weights"]
+            if (
+                len(weights) != 1
+                or next(iter(weights.values())) != 1
+                or coefficient_name != coefficient_mapping.get(next(iter(weights)))
+            ):
+                raise _integrity("An apeglm reporting effect is not a single +1 coefficient.")
+        observed.add(identifier)
+    if observed != set(by_id):
+        raise _integrity("The DESeq2 reporting-effect inventory is incomplete.")
+
+
+def _verify_deseq2_design(
+    rows: Sequence[Sequence[str]], analysis: Mapping[str, Any]
+) -> tuple[list[str], list[str], dict[str, str]]:
+    design = analysis.get("design")
+    if not isinstance(design, Mapping):
+        raise _integrity("The DESeq2 design evidence is invalid.")
+    _exact_keys(
+        design,
+        {
+            "intercept",
+            "terms",
+            "variable_types",
+            "factor_levels",
+            "columns",
+            "coefficient_mapping",
+            "sample_count",
+            "rank",
+            "residual_df",
+            "qr_tolerance",
+        },
+        context="DESeq2 design evidence",
+    )
+    edge_compatible_analysis = dict(analysis)
+    edge_compatible_design = dict(design)
+    mapping_records = edge_compatible_design.pop("coefficient_mapping")
+    edge_compatible_analysis["design"] = edge_compatible_design
+    sample_ids, columns = _verify_design(rows, edge_compatible_analysis)
+    if not isinstance(mapping_records, list) or len(mapping_records) != len(columns):
+        raise _integrity("The DESeq2 coefficient-name mapping is incomplete.")
+    mapping: dict[str, str] = {}
+    result_names: set[str] = set()
+    for index, record in enumerate(mapping_records, start=1):
+        if not isinstance(record, Mapping):
+            raise _integrity("A DESeq2 coefficient-name mapping record is invalid.")
+        _exact_keys(
+            record,
+            {"design_coefficient", "deseq2_result_name", "position"},
+            context=f"DESeq2 coefficient-name mapping {index}",
+        )
+        design_name = record.get("design_coefficient")
+        result_name = record.get("deseq2_result_name")
+        position = record.get("position")
+        if (
+            design_name != columns[index - 1]
+            or not isinstance(result_name, str)
+            or not result_name
+            or result_name in result_names
+            or isinstance(position, bool)
+            or not isinstance(position, int)
+            or position != index
+        ):
+            raise _integrity("The DESeq2 coefficient-name mapping is inconsistent.")
+        mapping[design_name] = result_name
+        result_names.add(result_name)
+    return sample_ids, columns, mapping
+
+
+def _verify_deseq2_analysis(
+    analysis: Mapping[str, Any], manifest: Mapping[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    _exact_keys(
+        analysis,
+        {
+            "schema_version",
+            "kind",
+            "backend",
+            "execution_scope",
+            "analysis_request",
+            "input_evidence",
+            "runtime_identity",
+            "input_semantics",
+            "route_observed",
+            "pipeline",
+            "defaults",
+            "design",
+            "test",
+            "contrasts",
+            "reporting_effect",
+            "genes",
+            "status_vocabulary",
+            "result_logFC_scale",
+            "coefficient_scale",
+            "multiple_testing",
+        },
+        context="DESeq2 analysis document",
+    )
+    identity = {
+        "schema_version": analysis.get("schema_version"),
+        "kind": analysis.get("kind"),
+        "backend": analysis.get("backend"),
+        "execution_scope": analysis.get("execution_scope"),
+        "runtime_identity": analysis.get("runtime_identity"),
+    }
+    expected_identity = {
+        "schema_version": _DESEQ2_SCHEMA_VERSION,
+        "kind": "deseq2_analysis",
+        "backend": "DESeq2",
+        "execution_scope": _DESEQ2_EXECUTION_SCOPE,
+        "runtime_identity": _DESEQ2_EXPECTED_RUNTIME,
+    }
+    if identity != expected_identity:
+        raise _integrity("The DESeq2 analysis identity is incompatible.", observed=identity)
+    if analysis.get("input_evidence") != manifest.get("input_evidence"):
+        raise _integrity("DESeq2 analysis and manifest input evidence disagree.")
+    request = analysis.get("analysis_request")
+    if not isinstance(request, Mapping):
+        raise _integrity("The DESeq2 analysis-request identity is invalid.")
+    _exact_keys(
+        request,
+        {"path", "sha256", "schema_version", "backend"},
+        context="DESeq2 analysis-request identity",
+    )
+    if (
+        not isinstance(request.get("path"), str)
+        or not request["path"]
+        or not isinstance(request.get("sha256"), str)
+        or _SHA256_PATTERN.fullmatch(request["sha256"]) is None
+        or request.get("schema_version") != "1.2"
+        or request.get("backend") != "deseq2"
+    ):
+        raise _integrity("The DESeq2 analysis-request identity is invalid.")
+    if analysis.get("status_vocabulary") != [
+        "filtered",
+        "not_tested",
+        "not_estimable",
+        "failed",
+        "tested",
+    ]:
+        raise _integrity("The DESeq2 status vocabulary is incompatible.")
+    if (
+        analysis.get("result_logFC_scale") != "log2"
+        or analysis.get("coefficient_scale") != "log2"
+        or analysis.get("multiple_testing")
+        != (
+            "Benjamini-Hochberg within each reporting contrast after "
+            "DESeq2 independent filtering"
+        )
+    ):
+        raise _integrity("The DESeq2 scale or multiple-testing identity is invalid.")
+    semantics = analysis.get("input_semantics")
+    if semantics not in (
+        "featurecounts_integer",
+        "salmon_quant_dirs_full_length",
+        "salmon_quant_dirs_three_prime",
+    ):
+        raise _integrity("The DESeq2 input semantics are unsupported.")
+    design = analysis.get("design")
+    if not isinstance(design, Mapping):
+        raise _integrity("The DESeq2 design evidence is invalid.")
+    defaults = _verify_deseq2_defaults(analysis.get("defaults"), design=design)
+    raw_columns = design.get("columns")
+    design_columns = [raw_columns] if isinstance(raw_columns, str) else raw_columns
+    if not isinstance(design_columns, list):
+        raise _integrity("The DESeq2 design-column inventory is invalid.")
+    test = _verify_deseq2_test(analysis.get("test"), design=design)
+    contrasts = _verify_deseq2_contrasts(
+        analysis.get("contrasts"),
+        design_columns=design_columns,
+        test=test,
+        defaults=defaults,
+    )
+    expected_pipeline = [
+        {
+            "step": "construct_DESeqDataSet",
+            "constructor": (
+                analysis.get("route_observed", {}).get("constructor")
+                if isinstance(analysis.get("route_observed"), Mapping)
+                else None
+            ),
+        },
+        {
+            "step": "DESeq",
+            "arguments": {
+                "test": "Wald" if test["mode"] == "wald" else "LRT",
+                "fitType": "parametric",
+                "sfType": "ratio",
+                "betaPrior": False,
+                "minReplicatesForReplace": 7,
+                "useT": False,
+                "minmu": 0.5,
+                "parallel": False,
+            },
+        },
+        {
+            "step": "results",
+            "arguments": {
+                "independentFiltering": True,
+                "cooksCutoff": "automatic",
+                "alpha": 0.1,
+                "pAdjustMethod": "BH",
+                "altHypothesis": "greaterAbs",
+                "parallel": False,
+            },
+        },
+        {
+            "step": "lfcShrink",
+            "method": test["shrinkage"],
+            "arguments": (
+                {"lfcThreshold": 0, "svalue": False}
+                if test["shrinkage"] == "apeglm"
+                else None
+            ),
+            "inferential_columns_changed": False,
+        },
+    ]
+    if analysis.get("pipeline") != expected_pipeline:
+        raise _integrity("The DESeq2 pipeline evidence is incompatible.")
+    genes = analysis.get("genes")
+    if not isinstance(genes, Mapping):
+        raise _integrity("The DESeq2 gene evidence is invalid.")
+    _exact_keys(
+        genes,
+        {"total", "result_rows", "status_counts"},
+        context="DESeq2 gene evidence",
+    )
+    total = genes.get("total")
+    result_rows = genes.get("result_rows")
+    if (
+        isinstance(total, bool)
+        or not isinstance(total, int)
+        or total <= 0
+        or isinstance(result_rows, bool)
+        or not isinstance(result_rows, int)
+        or result_rows != total * len(contrasts)
+    ):
+        raise _integrity("The DESeq2 gene dimensions are invalid.")
+    status_counts = genes.get("status_counts")
+    if (
+        not isinstance(status_counts, Mapping)
+        or set(status_counts) != _STATUSES
+        or any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in status_counts.values()
+        )
+        or sum(status_counts.values()) != result_rows
+    ):
+        raise _integrity("The aggregate DESeq2 status-count inventory is invalid.")
+    return contrasts, {"test": test, "defaults": defaults}
+
+
+def _verify_deseq2_rounding_audit(
+    value: Any,
+    *,
+    expected_mode: str,
+    sample_ids: Sequence[str],
+    gene_count: int,
+) -> None:
+    if not isinstance(value, Mapping):
+        raise _integrity("The DESeq2 count-rounding audit is invalid.")
+    _exact_keys(
+        value,
+        {
+            "mode",
+            "round_function",
+            "rule",
+            "hash_serialization",
+            "source_matrix_sha256",
+            "rounded_matrix_sha256",
+            "gene_count",
+            "sample_count",
+            "cell_count",
+            "changed_cell_count",
+            "max_absolute_delta",
+            "absolute_delta_sum",
+            "per_sample",
+        },
+        context="DESeq2 count-rounding audit",
+    )
+    if value.get("mode") != expected_mode:
+        raise _integrity("The DESeq2 count-rounding mode is incompatible.")
+    expected_rule = (
+        "not_applicable_exact_integer_input"
+        if expected_mode == "none_integer_input"
+        else "R_base_round_IEC_60559_ties_to_even"
+    )
+    expected_function = "none" if expected_mode == "none_integer_input" else "base::round"
+    if (
+        value.get("rule") != expected_rule
+        or value.get("round_function") != expected_function
+        or value.get("hash_serialization")
+        != "R_serialize_version_3_locked_runtime"
+    ):
+        raise _integrity("The DESeq2 count-rounding rule is incompatible.")
+    for field in ("source_matrix_sha256", "rounded_matrix_sha256"):
+        digest = value.get(field)
+        if not isinstance(digest, str) or _SHA256_PATTERN.fullmatch(digest) is None:
+            raise _integrity("A DESeq2 count-rounding matrix digest is invalid.", field=field)
+    sample_count = value.get("sample_count")
+    observed_gene_count = value.get("gene_count")
+    cell_count = value.get("cell_count")
+    changed_count = value.get("changed_cell_count")
+    if any(
+        isinstance(item, bool) or not isinstance(item, int) or item < 0
+        for item in (sample_count, observed_gene_count, cell_count, changed_count)
+    ) or (
+        sample_count != len(sample_ids)
+        or observed_gene_count != gene_count
+        or cell_count != sample_count * gene_count
+        or changed_count > cell_count
+    ):
+        raise _integrity("The DESeq2 count-rounding dimensions are inconsistent.")
+    maximum = _finite_json_number(
+        value.get("max_absolute_delta"),
+        context="DESeq2 maximum rounding delta",
+        nonnegative=True,
+    )
+    absolute_sum = _finite_json_number(
+        value.get("absolute_delta_sum"),
+        context="DESeq2 absolute rounding-delta sum",
+        nonnegative=True,
+    )
+    if maximum > 0.5 + 1e-12:
+        raise _integrity("The DESeq2 count-rounding delta exceeds one half.")
+    per_sample = value.get("per_sample")
+    if not isinstance(per_sample, list) or len(per_sample) != len(sample_ids):
+        raise _integrity("The DESeq2 per-sample rounding audit is incomplete.")
+    observed_samples: list[str] = []
+    summed_changed = 0
+    summed_absolute = 0.0
+    sample_maxima: list[float] = []
+    for index, record in enumerate(per_sample):
+        if not isinstance(record, Mapping):
+            raise _integrity("A DESeq2 per-sample rounding record is invalid.")
+        _exact_keys(
+            record,
+            {
+                "sample_id",
+                "cell_count",
+                "changed_cell_count",
+                "max_absolute_delta",
+                "absolute_delta_sum",
+                "total_count_before",
+                "total_count_after",
+                "total_count_delta",
+            },
+            context=f"DESeq2 per-sample rounding record {index}",
+        )
+        sample_id = record.get("sample_id")
+        record_cells = record.get("cell_count")
+        record_changed = record.get("changed_cell_count")
+        if (
+            not isinstance(sample_id, str)
+            or not sample_id
+            or isinstance(record_cells, bool)
+            or not isinstance(record_cells, int)
+            or record_cells != gene_count
+            or isinstance(record_changed, bool)
+            or not isinstance(record_changed, int)
+            or not 0 <= record_changed <= gene_count
+        ):
+            raise _integrity("A DESeq2 per-sample rounding record is inconsistent.")
+        record_maximum = _finite_json_number(
+            record.get("max_absolute_delta"),
+            context=f"DESeq2 sample {sample_id} maximum rounding delta",
+            nonnegative=True,
+        )
+        record_absolute = _finite_json_number(
+            record.get("absolute_delta_sum"),
+            context=f"DESeq2 sample {sample_id} absolute rounding-delta sum",
+            nonnegative=True,
+        )
+        before = _finite_json_number(
+            record.get("total_count_before"),
+            context=f"DESeq2 sample {sample_id} total before rounding",
+            nonnegative=True,
+        )
+        after = _finite_json_number(
+            record.get("total_count_after"),
+            context=f"DESeq2 sample {sample_id} total after rounding",
+            nonnegative=True,
+        )
+        delta = _finite_json_number(
+            record.get("total_count_delta"),
+            context=f"DESeq2 sample {sample_id} signed total-count delta",
+        )
+        if (
+            record_maximum > 0.5 + 1e-12
+            or record_absolute + 1e-12 < abs(delta)
+            or not math.isclose(after - before, delta, rel_tol=1e-12, abs_tol=1e-9)
+            or not float(after).is_integer()
+        ):
+            raise _integrity("A DESeq2 per-sample rounding delta is inconsistent.")
+        observed_samples.append(sample_id)
+        summed_changed += record_changed
+        summed_absolute += record_absolute
+        sample_maxima.append(record_maximum)
+    if observed_samples != list(sample_ids):
+        raise _integrity("The DESeq2 rounding audit sample order is incompatible.")
+    expected_maximum = max(sample_maxima, default=0.0)
+    if (
+        summed_changed != changed_count
+        or not math.isclose(summed_absolute, absolute_sum, rel_tol=1e-12, abs_tol=1e-9)
+        or not math.isclose(expected_maximum, maximum, rel_tol=1e-12, abs_tol=1e-12)
+    ):
+        raise _integrity("The DESeq2 aggregate rounding audit is inconsistent.")
+    if expected_mode == "none_integer_input" and (
+        value["source_matrix_sha256"] != value["rounded_matrix_sha256"]
+        or changed_count != 0
+        or maximum != 0
+        or absolute_sum != 0
+        or any(
+            record["total_count_delta"] != 0
+            for record in per_sample
+            if isinstance(record, Mapping)
+        )
+    ):
+        raise _integrity("Integer featureCounts input cannot carry a rounding mutation.")
+
+
+def _verify_deseq2_route(
+    analysis: Mapping[str, Any],
+    *,
+    sample_ids: Sequence[str],
+    gene_count: int,
+) -> None:
+    route = analysis.get("route_observed")
+    if not isinstance(route, Mapping):
+        raise _integrity("The observed DESeq2 input route is invalid.")
+    semantics = analysis.get("input_semantics")
+    if semantics == "featurecounts_integer":
+        _exact_keys(
+            route,
+            {
+                "constructor",
+                "count_source",
+                "count_semantics",
+                "transcript_length_offset",
+                "gene_length_correction",
+                "rounding_audit",
+                "inferential_replicates_imported",
+                "inferential_replicates_used_for_inference",
+                "inferential_replicates_unused_reason",
+            },
+            context="DESeq2 featureCounts route",
+        )
+        fixed = {
+            "constructor": "DESeq2::DESeqDataSetFromMatrix",
+            "count_source": "validated_featureCounts_integer_counts",
+            "count_semantics": "integer",
+            "transcript_length_offset": False,
+            "gene_length_correction": False,
+            "inferential_replicates_imported": False,
+            "inferential_replicates_used_for_inference": False,
+            "inferential_replicates_unused_reason": "not_applicable",
+        }
+        if any(route.get(key) != expected for key, expected in fixed.items()):
+            raise _integrity("The observed DESeq2 featureCounts route is incompatible.")
+        expected_rounding_mode = "none_integer_input"
+    elif semantics == "salmon_quant_dirs_full_length":
+        fixed = {
+            "constructor": "DESeq2::DESeqDataSetFromTximport",
+            "count_source": "txi$counts",
+            "count_semantics": "salmon_estimated_counts_rounded_for_DESeq2",
+            "transcript_length_offset": True,
+            "gene_length_correction": True,
+            "countsFromAbundance": "no",
+            "dropInfReps": False,
+            "inferential_replicates_used_for_inference": False,
+        }
+        _exact_keys(
+            route,
+            {
+                *fixed,
+                "inferential_replicates_imported",
+                "inferential_replicate_state",
+                "inferential_replicates_per_sample",
+                "inferential_replicate_method",
+                "inferential_replicates_unused_reason",
+                "rounding_audit",
+                "rounding_disclosure",
+            },
+            context="DESeq2 full-length Salmon route",
+        )
+        if any(route.get(key) != expected for key, expected in fixed.items()):
+            raise _integrity("The observed DESeq2 full-length Salmon route is incompatible.")
+        expected_rounding_mode = "deseq2_constructor"
+    else:
+        fixed = {
+            "constructor": "DESeq2::DESeqDataSetFromMatrix",
+            "count_source": "txi$counts",
+            "count_semantics": "salmon_estimated_counts_rounded_for_DESeq2",
+            "transcript_length_offset": False,
+            "gene_length_correction": False,
+            "countsFromAbundance": "no",
+            "dropInfReps": False,
+            "inferential_replicates_used_for_inference": False,
+        }
+        _exact_keys(
+            route,
+            {
+                *fixed,
+                "inferential_replicates_imported",
+                "inferential_replicate_state",
+                "inferential_replicates_per_sample",
+                "inferential_replicate_method",
+                "inferential_replicates_unused_reason",
+                "rounding_audit",
+                "rounding_disclosure",
+            },
+            context="DESeq2 three-prime Salmon route",
+        )
+        if any(route.get(key) != expected for key, expected in fixed.items()):
+            raise _integrity("The observed DESeq2 three-prime Salmon route is incompatible.")
+        expected_rounding_mode = "explicit_before_matrix_constructor"
+
+    if semantics != "featurecounts_integer":
+        count = route.get("inferential_replicates_per_sample")
+        state = route.get("inferential_replicate_state")
+        method = route.get("inferential_replicate_method")
+        imported = route.get("inferential_replicates_imported")
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
+            or state not in ("none", "all")
+            or not isinstance(imported, bool)
+        ):
+            raise _integrity("The DESeq2 inferential-replicate counts are invalid.")
+        if (
+            (state == "none" and (count != 0 or method is not None or imported))
+            or (
+                state == "all"
+                and (
+                    count < 1
+                    or not isinstance(method, str)
+                    or not method
+                    or not imported
+                )
+            )
+        ):
+            raise _integrity("The DESeq2 inferential-replicate import flag is invalid.")
+        if semantics == "salmon_quant_dirs_full_length" and count == 1:
+            raise _integrity(
+                "Full-length Salmon input must have zero or at least two inferential replicates per sample."
+            )
+        expected_unused = (
+            "DESeq2 1.52.0 does not consume tximport infReps in this backend; "
+            "they are imported only to verify declared evidence."
+        )
+        expected_disclosure = (
+            "DESeq2::DESeqDataSetFromTximport internally calls base::round; "
+            "the pre/post conversion is audited here."
+            if semantics == "salmon_quant_dirs_full_length"
+            else (
+                "The toolkit explicitly calls base::round before "
+                "DESeqDataSetFromMatrix; no length offset is attached."
+            )
+        )
+        if (
+            route.get("inferential_replicates_unused_reason") != expected_unused
+            or route.get("rounding_disclosure") != expected_disclosure
+        ):
+            raise _integrity("The DESeq2 Salmon disclosure is incompatible.")
+    _verify_deseq2_rounding_audit(
+        route.get("rounding_audit"),
+        expected_mode=expected_rounding_mode,
+        sample_ids=sample_ids,
+        gene_count=gene_count,
+    )
+
+
+_DESEQ2_MODEL_FAILURE_REASONS = {
+    "wald_model_nonconvergence",
+    "lrt_model_nonconvergence",
+    "lrt_full_model_nonconvergence",
+    "lrt_reduced_model_nonconvergence",
+    "lrt_full_and_reduced_model_nonconvergence",
+}
+_DESEQ2_RESULT_FAILURE_REASONS = _DESEQ2_MODEL_FAILURE_REASONS | {
+    "cooks_outlier",
+    "apeglm_nonconvergence",
+}
+
+
+def _verify_deseq2_coefficients(
+    rows: Sequence[Sequence[str]],
+    *,
+    columns: Sequence[str],
+    expected_genes: set[str],
+) -> tuple[
+    dict[str, dict[str, float]],
+    dict[str, set[tuple[str, str]]],
+]:
+    observed: set[tuple[str, str]] = set()
+    observed_genes: set[str] = set()
+    estimates: dict[str, dict[str, float]] = {}
+    gene_states: dict[str, set[tuple[str, str]]] = {}
+    for row_number, row in enumerate(rows, start=2):
+        gene, status, reason, coefficient, estimate, scale = row
+        if not gene or coefficient not in columns or status not in _STATUSES:
+            raise _integrity(
+                "A DESeq2 coefficient identity or status is invalid.", row=row_number
+            )
+        if status not in {"tested", "not_tested", "failed"}:
+            raise _integrity(
+                "A completed DESeq2 coefficient row has an impossible status.",
+                row=row_number,
+                status=status,
+            )
+        key = (gene, coefficient)
+        if key in observed:
+            raise _integrity(
+                "The DESeq2 coefficient TSV contains a duplicate gene/coefficient row.",
+                row=row_number,
+            )
+        observed.add(key)
+        observed_genes.add(gene)
+        gene_states.setdefault(gene, set()).add((status, reason))
+        if scale != "log2":
+            raise _integrity(
+                "A DESeq2 coefficient row has an incompatible scale.",
+                row=row_number,
+            )
+        if status == "tested":
+            if reason != "fitted":
+                raise _integrity("A fitted DESeq2 coefficient has an invalid reason.")
+            value = _number(
+                estimate, role="coefficients.tsv", row=row_number, field="estimate"
+            )
+        else:
+            expected_reason = "all_zero" if status == "not_tested" else None
+            if (
+                (expected_reason is not None and reason != expected_reason)
+                or (
+                    status == "failed"
+                    and reason
+                    not in (_DESEQ2_MODEL_FAILURE_REASONS | {"coefficient_unavailable"})
+                )
+                or (status == "not_tested" and estimate)
+            ):
+                raise _integrity(
+                    "An unavailable DESeq2 coefficient has incompatible evidence.",
+                    row=row_number,
+                )
+            value = (
+                _number(
+                    estimate,
+                    role="coefficients.tsv",
+                    row=row_number,
+                    field="estimate",
+                )
+                if estimate
+                else None
+            )
+            if reason == "coefficient_unavailable" and value is not None:
+                raise _integrity("An unavailable DESeq2 coefficient cannot carry a value.")
+        if value is not None:
+            estimates.setdefault(gene, {})[coefficient] = value
+    expected = {
+        (gene, coefficient) for gene in expected_genes for coefficient in columns
+    }
+    if observed_genes != expected_genes or observed != expected:
+        raise _integrity("The DESeq2 coefficient TSV is not the complete declared matrix.")
+    for gene, states in gene_states.items():
+        if any(status == "not_tested" for status, _ in states):
+            if states != {("not_tested", "all_zero")}:
+                raise _integrity(
+                    "An all-zero DESeq2 gene has inconsistent coefficient states.",
+                    gene_id=gene,
+                )
+            continue
+        model_failures = {
+            reason
+            for status, reason in states
+            if status == "failed" and reason in _DESEQ2_MODEL_FAILURE_REASONS
+        }
+        if model_failures and (
+            len(model_failures) != 1
+            or states != {("failed", next(iter(model_failures)))}
+        ):
+            raise _integrity(
+                "A model-failed DESeq2 gene has inconsistent coefficient states.",
+                gene_id=gene,
+            )
+    return estimates, gene_states
+
+
+def _optional_number(
+    value: str, *, role: str, row: int, field: str
+) -> float | None:
+    if not value:
+        return None
+    return _number(value, role=role, row=row, field=field)
+
+
+def _deseq2_expected_result_identity(
+    contrast: Mapping[str, Any], *, test: Mapping[str, Any]
+) -> tuple[str, str, str, str]:
+    if test["mode"] == "lrt":
+        return (
+            "DESeq2::results_LRT",
+            "LRT",
+            "full_vs_reduced_omnibus",
+            "omnibus_pvalue_BH",
+        )
+    if contrast["lfc_threshold"] > 0:
+        return (
+            "DESeq2::results_Wald_greaterAbs",
+            "Wald",
+            "abs_log2_fold_change_greater_than_threshold",
+            "contrast_threshold_pvalue_BH_after_independent_filtering",
+        )
+    return (
+        "DESeq2::results_Wald",
+        "Wald",
+        "contrast_equals_zero",
+        "contrast_pvalue_BH_after_independent_filtering",
+    )
+
+
+def _verify_deseq2_results(
+    rows: Sequence[Sequence[str]],
+    *,
+    contrasts: Sequence[Mapping[str, Any]],
+    analysis: Mapping[str, Any],
+    test: Mapping[str, Any],
+    coefficient_estimates: Mapping[str, Mapping[str, float]],
+    coefficient_states: Mapping[str, set[tuple[str, str]]],
+) -> tuple[list[dict[str, Any]], set[str]]:
+    if not rows:
+        raise _integrity("The DESeq2 results TSV contains no result rows.")
+    contrast_by_id = {item["contrast_id"]: item for item in contrasts}
+    observed: set[tuple[str, str]] = set()
+    genes_by_contrast: dict[str, set[str]] = {
+        identifier: set() for identifier in contrast_by_id
+    }
+    status_counts = {
+        identifier: {status: 0 for status in sorted(_STATUSES)}
+        for identifier in contrast_by_id
+    }
+    significance = {
+        identifier: {"fdr_le_0_05": 0, "fdr_gt_0_05": 0, "not_tested": 0}
+        for identifier in contrast_by_id
+    }
+    adjusted_probabilities: dict[str, list[tuple[float, float, int]]] = {
+        identifier: [] for identifier in contrast_by_id
+    }
+    apeglm_nonconvergence_counts = {
+        identifier: 0 for identifier in contrast_by_id
+    }
+    for row_number, row in enumerate(rows, start=2):
+        values = dict(zip(_DESEQ2_RESULT_HEADER, row, strict=True))
+        gene = values["gene_id"]
+        identifier = values["contrast_id"]
+        status = values["status"]
+        reason = values["status_reason"]
+        if (
+            not gene
+            or has_control_characters(gene)
+            or identifier not in contrast_by_id
+            or status not in _STATUSES
+        ):
+            raise _integrity("A DESeq2 result identity or status is invalid.", row=row_number)
+        if status == "not_estimable":
+            raise _integrity(
+                "A completed DESeq2 bundle cannot contain a non-estimable row.",
+                row=row_number,
+            )
+        key = (gene, identifier)
+        if key in observed:
+            raise _integrity(
+                "The DESeq2 results contain a duplicate gene/contrast row.",
+                row=row_number,
+            )
+        observed.add(key)
+        genes_by_contrast[identifier].add(gene)
+        contrast = contrast_by_id[identifier]
+        threshold = _number(
+            values["lfc_threshold"],
+            role="results.tsv",
+            row=row_number,
+            field="lfc_threshold",
+        )
+        expected_method, expected_statistic, expected_hypothesis, expected_fdr_basis = (
+            _deseq2_expected_result_identity(contrast, test=test)
+        )
+        if (
+            threshold != contrast["lfc_threshold"]
+            or values["test_method"] != expected_method
+            or values["statistic_type"] != expected_statistic
+            or values["statistic_hypothesis"] != expected_hypothesis
+            or values["fdr_basis"] != expected_fdr_basis
+            or values["shrinkage_method"] != contrast["shrinkage_method"]
+        ):
+            raise _integrity(
+                "A DESeq2 result row disagrees with its declared test.", row=row_number
+            )
+
+        parsed = {
+            field: _optional_number(
+                values[field], role="results.tsv", row=row_number, field=field
+            )
+            for field in (
+                "baseMean",
+                "logFC",
+                "unshrunk_logFC",
+                "lfcSE",
+                "statistic",
+                "PValue",
+                "FDR",
+            )
+        }
+        base_mean = parsed["baseMean"]
+        if base_mean is None or base_mean < 0:
+            raise _integrity("A DESeq2 baseMean is missing or negative.", row=row_number)
+        for probability in ("PValue", "FDR"):
+            number = parsed[probability]
+            if number is not None and not 0 <= number <= 1:
+                raise _integrity(
+                    "A DESeq2 probability is outside [0, 1].",
+                    row=row_number,
+                    field=probability,
+                )
+        if parsed["lfcSE"] is not None and parsed["lfcSE"] < 0:
+            raise _integrity("A DESeq2 LFC standard error is negative.", row=row_number)
+        if test["mode"] == "lrt" and parsed["statistic"] is not None and parsed["statistic"] < 0:
+            raise _integrity("A DESeq2 LRT statistic is negative.", row=row_number)
+
+        if test["shrinkage"] == "none":
+            if (parsed["unshrunk_logFC"] is None) != (parsed["logFC"] is None) or (
+                parsed["unshrunk_logFC"] is not None
+                and not math.isclose(
+                    parsed["unshrunk_logFC"],
+                    parsed["logFC"],
+                    rel_tol=1e-12,
+                    abs_tol=1e-12,
+                )
+            ):
+                raise _integrity(
+                    "An unshrunk DESeq2 LFC must equal logFC when shrinkage is disabled.",
+                    row=row_number,
+                )
+        elif status in {"tested", "filtered"} or reason in {
+            "cooks_outlier",
+            "apeglm_nonconvergence",
+        }:
+            if parsed["unshrunk_logFC"] is None:
+                raise _integrity(
+                    "An apeglm result must preserve the unshrunk DESeq2 LFC.",
+                    row=row_number,
+                )
+        if reason == "apeglm_nonconvergence" and parsed["logFC"] is not None:
+            raise _integrity(
+                "An apeglm failure cannot silently fall back to an unshrunk LFC.",
+                row=row_number,
+            )
+        if reason == "apeglm_nonconvergence":
+            apeglm_nonconvergence_counts[identifier] += 1
+
+        required_model_outcomes = ("logFC", "lfcSE", "statistic", "PValue")
+        if status == "tested":
+            if reason != "tested" or any(parsed[field] is None for field in required_model_outcomes):
+                raise _integrity("A tested DESeq2 row is incomplete.", row=row_number)
+        elif status == "filtered":
+            if (
+                reason != "independent_filtering"
+                or any(parsed[field] is None for field in required_model_outcomes)
+                or parsed["FDR"] is not None
+                or base_mean >= contrast["independent_filter_threshold"]
+            ):
+                raise _integrity("A filtered DESeq2 row is inconsistent.", row=row_number)
+        elif status == "not_tested":
+            if (
+                reason != "all_zero"
+                or base_mean != 0
+                or any(
+                    parsed[field] is not None
+                    for field in (
+                        "logFC",
+                        "unshrunk_logFC",
+                        "lfcSE",
+                        "statistic",
+                        "PValue",
+                        "FDR",
+                    )
+                )
+            ):
+                raise _integrity("An all-zero DESeq2 row is inconsistent.", row=row_number)
+        else:
+            if reason not in _DESEQ2_RESULT_FAILURE_REASONS:
+                raise _integrity("A failed DESeq2 row has an unknown reason.", row=row_number)
+            if reason == "cooks_outlier" and (
+                parsed["PValue"] is not None or parsed["FDR"] is not None
+            ):
+                raise _integrity("A Cook's-outlier row cannot carry PValue or FDR.")
+
+        gene_coefficient_states = coefficient_states.get(gene, set())
+        if status == "not_tested":
+            expected_coefficient_states = {("not_tested", "all_zero")}
+            if gene_coefficient_states != expected_coefficient_states:
+                raise _integrity(
+                    "An all-zero DESeq2 result disagrees with coefficients.tsv.",
+                    row=row_number,
+                )
+        elif reason in _DESEQ2_MODEL_FAILURE_REASONS:
+            if gene_coefficient_states != {("failed", reason)}:
+                raise _integrity(
+                    "A model-failed DESeq2 result disagrees with coefficients.tsv.",
+                    row=row_number,
+                )
+        elif any(
+            coefficient_reason == "all_zero"
+            or coefficient_reason in _DESEQ2_MODEL_FAILURE_REASONS
+            for _, coefficient_reason in gene_coefficient_states
+        ):
+            raise _integrity(
+                "A DESeq2 result status disagrees with the gene model state.",
+                row=row_number,
+            )
+
+        p_value = parsed["PValue"]
+        fdr = parsed["FDR"]
+        passes_filter = base_mean >= contrast["independent_filter_threshold"]
+        if p_value is None:
+            if fdr is not None:
+                raise _integrity("A DESeq2 FDR cannot exist without a finite PValue.")
+        elif passes_filter:
+            if fdr is None:
+                raise _integrity(
+                    "A finite, filter-passing DESeq2 PValue must carry an FDR.",
+                    row=row_number,
+                )
+        elif fdr is not None:
+            raise _integrity(
+                "An independently filtered DESeq2 PValue cannot carry an FDR.",
+                row=row_number,
+            )
+        if fdr is not None:
+            adjusted_probabilities[identifier].append((p_value, fdr, row_number))
+            significance[identifier][
+                "fdr_le_0_05" if fdr <= 0.05 else "fdr_gt_0_05"
+            ] += 1
+        else:
+            significance[identifier]["not_tested"] += 1
+
+        gene_coefficients = coefficient_estimates.get(gene)
+        reported_unshrunk = parsed["unshrunk_logFC"]
+        if reported_unshrunk is not None:
+            available_coefficients = gene_coefficients or {}
+            missing_coefficients = sorted(
+                set(contrast["weights"]) - set(available_coefficients)
+            )
+            if missing_coefficients:
+                raise _integrity(
+                    "A DESeq2 reporting effect cannot be reproduced from incomplete "
+                    "coefficients.",
+                    row=row_number,
+                    missing_coefficients=missing_coefficients,
+                )
+            expected_effect = sum(
+                available_coefficients[coefficient] * weight
+                for coefficient, weight in contrast["weights"].items()
+            )
+            clean_contrast_all_zero = (
+                any(weight < 0 for weight in contrast["weights"].values())
+                and any(weight > 0 for weight in contrast["weights"].values())
+                and reported_unshrunk == 0
+                and parsed["statistic"] == 0
+                and parsed["PValue"] == 1
+            )
+            if not clean_contrast_all_zero and not math.isclose(
+                reported_unshrunk,
+                expected_effect,
+                rel_tol=1e-8,
+                abs_tol=1e-10,
+            ):
+                raise _integrity(
+                    "A DESeq2 reporting effect does not reproduce from coefficients.",
+                    row=row_number,
+                    expected=expected_effect,
+                    observed=reported_unshrunk,
+                )
+        status_counts[identifier][status] += 1
+
+    inventories = list(genes_by_contrast.values())
+    genes = inventories[0]
+    if any(inventory != genes for inventory in inventories[1:]):
+        raise _integrity("DESeq2 contrasts do not contain the same gene inventory.")
+    expected_pairs = {
+        (gene, identifier) for gene in genes for identifier in contrast_by_id
+    }
+    if observed != expected_pairs:
+        raise _integrity("The DESeq2 results are not the complete gene/contrast matrix.")
+    for identifier, probabilities in adjusted_probabilities.items():
+        expected_fdr = _benjamini_hochberg(
+            [p_value for p_value, _, _ in probabilities]
+        )
+        for (_, observed_fdr, row_number), expected_value in zip(
+            probabilities, expected_fdr, strict=True
+        ):
+            if not math.isclose(
+                observed_fdr,
+                expected_value,
+                rel_tol=1e-10,
+                abs_tol=1e-12,
+            ):
+                raise _integrity(
+                    "A DESeq2 FDR does not equal the independently recomputed "
+                    "within-contrast Benjamini-Hochberg adjustment.",
+                    contrast_id=identifier,
+                    row=row_number,
+                    observed_fdr=observed_fdr,
+                    expected_fdr=expected_value,
+                )
+    for identifier, observed_count in apeglm_nonconvergence_counts.items():
+        expected_count = contrast_by_id[identifier][
+            "shrinkage_nonconvergence_count"
+        ]
+        if observed_count != expected_count:
+            raise _integrity(
+                "The DESeq2 apeglm convergence count disagrees with results.tsv.",
+                contrast_id=identifier,
+                observed=observed_count,
+                expected=expected_count,
+            )
+    gene_evidence = analysis["genes"]
+    expected_status_counts = {
+        status: sum(counts[status] for counts in status_counts.values())
+        for status in sorted(_STATUSES)
+    }
+    if (
+        gene_evidence["total"] != len(genes)
+        or gene_evidence["result_rows"] != len(rows)
+        or gene_evidence["status_counts"] != expected_status_counts
+        or analysis["defaults"]["outlier_replacement_count"] > len(genes)
+    ):
+        raise _integrity("The DESeq2 gene evidence disagrees with results.tsv.")
+    summaries: list[dict[str, Any]] = []
+    for contrast in contrasts:
+        identifier = contrast["contrast_id"]
+        summaries.append(
+            {
+                "contrast_id": identifier,
+                "lfc_threshold": contrast["lfc_threshold"],
+                "test_method": contrast["test_method"],
+                "alternative_hypothesis": contrast["alternative_hypothesis"],
+                "status_counts": status_counts[identifier],
+                "significance_counts": significance[identifier],
+            }
+        )
+    return summaries, genes
 
 
 def _pathway_integer(value: str, *, row: int, field: str) -> int:
@@ -2017,8 +3608,96 @@ def _verify_pathway_results(
     }
 
 
+def _summarize_deseq2(
+    resolved: Path,
+    captured: Mapping[str, tuple[bytes, str, int]],
+    display_dir: Path | None,
+    manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    if display_dir is not None:
+        raise _integrity("A D1 DESeq2 bundle cannot contain an edgeR display sidecar.")
+    if _PATHWAY_RESULT_FILE in captured:
+        raise _integrity("A D1 DESeq2 bundle cannot contain edgeR pathway results.")
+    _verify_deseq2_manifest(manifest, captured)
+    analysis = _json_object(captured["analysis.json"][0], role="DESeq2 analysis")
+    contrasts, configuration = _verify_deseq2_analysis(analysis, manifest)
+    design_rows = _tsv_rows(
+        captured["design.tsv"][0],
+        expected_header=_DESIGN_HEADER,
+        role="design.tsv",
+    )
+    design_samples, design_columns, coefficient_mapping = _verify_deseq2_design(
+        design_rows, analysis
+    )
+    _verify_deseq2_reporting_effects(
+        analysis.get("reporting_effect"),
+        contrasts=contrasts,
+        coefficient_mapping=coefficient_mapping,
+        test=configuration["test"],
+    )
+    result_rows = _tsv_rows(
+        captured["results.tsv"][0],
+        expected_header=_DESEQ2_RESULT_HEADER,
+        role="results.tsv",
+    )
+    provisional_genes = {row[0] for row in result_rows if row and row[0]}
+    coefficient_rows = _tsv_rows(
+        captured["coefficients.tsv"][0],
+        expected_header=_DESEQ2_COEFFICIENT_HEADER,
+        role="coefficients.tsv",
+    )
+    coefficient_estimates, coefficient_states = _verify_deseq2_coefficients(
+        coefficient_rows,
+        columns=design_columns,
+        expected_genes=provisional_genes,
+    )
+    contrast_summaries, genes = _verify_deseq2_results(
+        result_rows,
+        contrasts=contrasts,
+        analysis=analysis,
+        test=configuration["test"],
+        coefficient_estimates=coefficient_estimates,
+        coefficient_states=coefficient_states,
+    )
+    if genes != provisional_genes:
+        raise _integrity("The DESeq2 result gene inventory is inconsistent.")
+    _verify_deseq2_route(
+        analysis,
+        sample_ids=design_samples,
+        gene_count=len(genes),
+    )
+    artifacts = []
+    for name in sorted(captured):
+        _, digest, size = captured[name]
+        artifacts.append(
+            {
+                "kind": "consumed_analysis_artifact",
+                "role": name.removesuffix(".json").removesuffix(".tsv"),
+                "path": str(resolved / name),
+                "sha256": digest,
+                "size_bytes": size,
+            }
+        )
+    evidence = manifest["input_evidence"]
+    return {
+        "schema_version": _DESEQ2_SCHEMA_VERSION,
+        "status": "verified_complete",
+        "run_dir": str(resolved),
+        "backend": "DESeq2",
+        "execution_scope": _DESEQ2_EXECUTION_SCOPE,
+        "runtime_identity": dict(_DESEQ2_EXPECTED_RUNTIME),
+        "plan_id": evidence["plan_id"],
+        "input_semantics": analysis["input_semantics"],
+        "test": dict(configuration["test"]),
+        "gene_count": len(genes),
+        "result_row_count": len(result_rows),
+        "contrasts": contrast_summaries,
+        "artifacts": artifacts,
+    }
+
+
 def summarize_run(run_dir: str | Path) -> dict[str, Any]:
-    """Verify and summarize one immutable public P0 result bundle.
+    """Verify and summarize one supported immutable public result bundle.
 
     The summary is computed only from bytes captured and verified against the
     backend manifest. It never trusts file presence as evidence of success.
@@ -2029,6 +3708,20 @@ def summarize_run(run_dir: str | Path) -> dict[str, Any]:
     manifest = _json_object(
         captured["backend_manifest.json"][0], role="backend_manifest"
     )
+    manifest_identity = (manifest.get("kind"), manifest.get("backend"))
+    if manifest_identity == ("deseq2_backend_manifest", "DESeq2"):
+        return _summarize_deseq2(
+            resolved,
+            captured,
+            display_dir,
+            manifest,
+        )
+    if manifest_identity != ("edger_ql_backend_manifest", "edgeR_QL"):
+        raise _integrity(
+            "The result bundle declares an unsupported backend identity.",
+            kind=manifest.get("kind"),
+            backend=manifest.get("backend"),
+        )
     _verify_manifest(manifest, captured)
     analysis = _json_object(captured["analysis.json"][0], role="analysis")
     contrasts = _verify_analysis(analysis, manifest)

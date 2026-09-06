@@ -479,8 +479,17 @@ def build_display_bundle(
     backend_document: Mapping[str, Any],
     backend_data: Mapping[str, Any],
     configuration: Mapping[str, Any],
+    analysis_request_schema_version: str = "1.1",
 ) -> list[dict[str, Any]]:
     """Build and internally verify one display sidecar before publication."""
+
+    if analysis_request_schema_version not in ("1.1", "1.2"):
+        raise BackendFailedError(
+            "The display request schema identity is incompatible.",
+            details={
+                "analysis_request_schema_version": analysis_request_schema_version
+            },
+        )
 
     try:
         import numpy as np
@@ -722,7 +731,7 @@ def build_display_bundle(
         "execution_scope": str(backend_document["execution_scope"]),
         "plan_id": str(backend_document["input_evidence"].get("plan_id", "")),
         "analysis_request_sha256": str(backend_document["analysis_request"]["sha256"]),
-        "analysis_request_schema_version": "1.1",
+        "analysis_request_schema_version": analysis_request_schema_version,
         "members": source_members,
     }
     ql_parameters = backend_data.get("ql_fit_parameters")
@@ -1034,13 +1043,23 @@ def verify_display_bundle(
             }
             for name in _CORE_FILES
         ]
+        source_bundle = manifest["source_bundle"]
+        if not isinstance(source_bundle, Mapping):
+            raise InputIntegrityError("The display source-bundle identity is invalid.")
+        request_schema_version = source_bundle.get(
+            "analysis_request_schema_version"
+        )
+        if request_schema_version not in ("1.1", "1.2"):
+            raise InputIntegrityError(
+                "The display source-bundle request schema is unsupported."
+            )
         expected_source_bundle = {
             "source_bundle_id": _canonical_digest(expected_source_members),
             "backend": "edgeR_QL",
             "execution_scope": "validated_p0_input",
             "plan_id": backend_manifest["input_evidence"]["plan_id"],
             "analysis_request_sha256": analysis["analysis_request"]["sha256"],
-            "analysis_request_schema_version": "1.1",
+            "analysis_request_schema_version": request_schema_version,
             "members": expected_source_members,
         }
         if not _json_exact_equal(manifest["source_bundle"], expected_source_bundle):

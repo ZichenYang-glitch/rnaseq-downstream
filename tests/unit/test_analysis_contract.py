@@ -9,8 +9,9 @@ import pytest
 from rnaseq_downstream.analysis_contract import (
     _parse_design,
     _parse_display,
-    load_analysis_request,
+    load_analysis_request as load_legacy_analysis_request,
 )
+from rnaseq_downstream.analysis_contract_v12 import load_analysis_request
 from rnaseq_downstream.edger_backend import (
     _capture_output_json,
     _invoke_r,
@@ -24,6 +25,9 @@ from rnaseq_downstream.errors import (
     InvalidRequestError,
 )
 from rnaseq_downstream.validation_bundle import validate_request_to_bundle
+
+
+_MISSING = object()
 
 
 def _write(path: Path, content: str) -> Path:
@@ -137,11 +141,16 @@ def _analysis_request(
     schema_version: str = "1.0",
     display: object | None = None,
     gene_sets: object | None = None,
+    backend: object = _MISSING,
+    deseq2: object = _MISSING,
+    contrasts: list[dict[str, object]] | None = None,
+    design: dict[str, object] | None = None,
 ) -> Path:
     document: dict[str, object] = {
         "schema_version": schema_version,
         "validated_input_bundle": str(bundle),
-        "design": {
+        "design": design
+        or {
             "intercept": True,
             "terms": ["condition"],
             "variables": {
@@ -151,7 +160,8 @@ def _analysis_request(
                 }
             },
         },
-        "contrasts": [
+        "contrasts": contrasts
+        or [
             {
                 "contrast_id": "treated_vs_control",
                 "weights": weights,
@@ -163,6 +173,10 @@ def _analysis_request(
         document["display"] = display
     if gene_sets is not None:
         document["gene_sets"] = gene_sets
+    if backend is not _MISSING:
+        document["backend"] = backend
+    if deseq2 is not _MISSING:
+        document["deseq2"] = deseq2
     return _write_json(root / "analysis.json", document)
 
 
@@ -175,6 +189,8 @@ def test_analysis_contract_accepts_only_complete_eligible_bundle(
     validated = load_analysis_request(request)
 
     assert validated.request_schema_version == "1.0"
+    assert validated.backend == "edger_ql"
+    assert validated.deseq2 is None
     assert validated.display is None
     assert validated.input_data["input_certification_eligible"] is True
     assert validated.input_data["input_semantics"] == "featurecounts_integer"
@@ -183,6 +199,20 @@ def test_analysis_contract_accepts_only_complete_eligible_bundle(
         "input_plan",
         "provenance",
         "validated_request",
+    }
+    backend_document = validated.to_backend_document()
+    assert set(backend_document) == {
+        "schema_version",
+        "kind",
+        "analysis_request",
+        "validated_input_bundle",
+        "input",
+        "design",
+        "contrasts",
+    }
+    assert backend_document["analysis_request"] == {
+        "path": str(request.resolve()),
+        "sha256": _sha256(request),
     }
 
 
@@ -213,7 +243,41 @@ def test_analysis_request_v11_accepts_explicit_display_without_changing_backend_
     assert validated.gene_sets is None
     backend_document = validated.to_backend_document()
     assert backend_document["schema_version"] == "1.0"
+    assert backend_document["analysis_request"] == {
+        "path": str(request.resolve()),
+        "sha256": _sha256(request),
+    }
     assert "display" not in backend_document
+
+
+@pytest.mark.parametrize("schema_version", ["1.0", "1.1"])
+def test_v12_wrapper_preserves_legacy_private_edge_document_exactly(
+    tmp_path: Path,
+    schema_version: str,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version=schema_version,
+        display=(
+            {
+                "fdr_threshold": 0.05,
+                "pca_top_n": 500,
+                "pca_components": [1, 2],
+            }
+            if schema_version == "1.1"
+            else None
+        ),
+    )
+
+    legacy = load_legacy_analysis_request(request)
+    extended = load_analysis_request(request)
+
+    assert extended.backend == "edger_ql"
+    assert extended.deseq2 is None
+    assert extended.to_backend_document() == legacy.to_backend_document()
 
 
 def test_analysis_request_v10_stays_strict_and_rejects_display(
@@ -238,8 +302,10 @@ def test_analysis_request_v10_stays_strict_and_rejects_display(
     assert caught.value.details["unknown_keys"] == ["display"]
 
 
-def test_analysis_request_v11_accepts_optional_frozen_gene_set_sources(
+@pytest.mark.parametrize("schema_version", ["1.1", "1.2"])
+def test_edger_analysis_request_accepts_optional_frozen_gene_set_sources(
     tmp_path: Path,
+    schema_version: str,
 ) -> None:
     bundle = _validated_bundle(tmp_path)
     gmt = _write(tmp_path / "sets.gmt", "SET_A\tdescription\tA\tB\n")
@@ -251,7 +317,7 @@ def test_analysis_request_v11_accepts_optional_frozen_gene_set_sources(
         tmp_path,
         bundle,
         weights={"conditiontreated": 1},
-        schema_version="1.1",
+        schema_version=schema_version,
         display={
             "fdr_threshold": 0.05,
             "pca_top_n": 500,
@@ -279,6 +345,7 @@ def test_analysis_request_v11_accepts_optional_frozen_gene_set_sources(
 
     validated = load_analysis_request(request)
 
+    assert validated.backend == "edger_ql"
     assert validated.gene_sets is not None
     assert validated.gene_sets["gmt"]["path"] == str(gmt.resolve())
     assert validated.gene_sets["gmt"]["declared_path"] == gmt.name
@@ -320,7 +387,27 @@ def test_analysis_request_v11_requires_display(tmp_path: Path) -> None:
     assert caught.value.details["missing_keys"] == ["display"]
 
 
-def test_analysis_request_reports_both_supported_public_versions(
+def test_analysis_request_reports_all_supported_public_versions(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.3",
+    )
+
+    with pytest.raises(InvalidRequestError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details == {
+        "observed": "1.3",
+        "supported": ["1.0", "1.1", "1.2"],
+    }
+
+
+def test_analysis_request_v12_defaults_to_edger_without_changing_private_protocol(
     tmp_path: Path,
 ) -> None:
     bundle = _validated_bundle(tmp_path)
@@ -331,13 +418,536 @@ def test_analysis_request_reports_both_supported_public_versions(
         schema_version="1.2",
     )
 
+    validated = load_analysis_request(request)
+
+    assert validated.request_schema_version == "1.2"
+    assert validated.backend == "edger_ql"
+    assert validated.deseq2 is None
+    backend_document = validated.to_backend_document()
+    assert backend_document["schema_version"] == "1.0"
+    assert backend_document["kind"] == "edger_ql_backend_request"
+    assert backend_document["analysis_request"] == {
+        "path": str(request.resolve()),
+        "sha256": _sha256(request),
+    }
+    assert "backend" not in backend_document
+    assert "deseq2" not in backend_document
+    assert "display" not in backend_document
+    with pytest.raises(InvalidRequestError, match="normalized DESeq2"):
+        validated.to_deseq2_backend_document()
+
+
+def test_analysis_request_v12_edger_accepts_existing_display_extension(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="edger_ql",
+        display={
+            "fdr_threshold": 0.05,
+            "pca_top_n": 500,
+            "pca_components": [1, 2],
+        },
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.backend == "edger_ql"
+    assert validated.display == {
+        "fdr_threshold": 0.05,
+        "pca_top_n": 500,
+        "pca_components": [1, 2],
+    }
+
+
+@pytest.mark.parametrize("schema_version", ["1.0", "1.1"])
+@pytest.mark.parametrize("field", ["backend", "deseq2"])
+def test_legacy_analysis_request_versions_reject_v12_fields(
+    tmp_path: Path,
+    schema_version: str,
+    field: str,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version=schema_version,
+        display=(
+            {
+                "fdr_threshold": 0.05,
+                "pca_top_n": 500,
+                "pca_components": [1, 2],
+            }
+            if schema_version == "1.1"
+            else None
+        ),
+        backend="edger_ql" if field == "backend" else _MISSING,
+        deseq2=(
+            {"test_mode": "wald", "shrinkage": "none"}
+            if field == "deseq2"
+            else _MISSING
+        ),
+    )
+
     with pytest.raises(InvalidRequestError) as caught:
         load_analysis_request(request)
 
-    assert caught.value.details == {
-        "observed": "1.2",
-        "supported": ["1.0", "1.1"],
+    assert caught.value.details["unknown_keys"] == [field]
+
+
+@pytest.mark.parametrize(
+    "backend",
+    ["edgeR_ql", "edger", "deseq2 ", "DESeq2", "", None, True, 1, {}],
+)
+def test_analysis_request_v12_rejects_nonexact_backend_values(
+    tmp_path: Path,
+    backend: object,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend=backend,
+    )
+
+    with pytest.raises(InvalidRequestError, match="'backend'"):
+        load_analysis_request(request)
+
+
+def test_analysis_request_v12_edger_rejects_deseq2_configuration(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        deseq2={"test_mode": "wald", "shrinkage": "none"},
+    )
+
+    with pytest.raises(InvalidRequestError, match="edgeR request"):
+        load_analysis_request(request)
+
+
+def test_analysis_request_v12_edger_gene_sets_still_require_display(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        gene_sets={},
+    )
+
+    with pytest.raises(InvalidRequestError, match="requires the atomic display"):
+        load_analysis_request(request)
+
+
+def test_analysis_request_v12_accepts_deseq2_wald_and_serializes_separately(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        deseq2={"test_mode": "wald", "shrinkage": "none"},
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.backend == "deseq2"
+    assert validated.display is None
+    assert validated.gene_sets is None
+    assert validated.deseq2 == {"test_mode": "wald", "shrinkage": "none"}
+    with pytest.raises(InvalidRequestError, match="non-edgeR"):
+        validated.to_backend_document()
+    backend_document = validated.to_deseq2_backend_document()
+    assert backend_document["schema_version"] == "1.0"
+    assert backend_document["kind"] == "deseq2_backend_request"
+    assert backend_document["analysis_request"] == {
+        "path": str(request.resolve()),
+        "sha256": _sha256(request),
+        "schema_version": "1.2",
+        "backend": "deseq2",
     }
+    assert backend_document["deseq2"] == validated.deseq2
+    assert backend_document["deseq2"] is not validated.deseq2
+    assert "display" not in backend_document
+    assert "gene_sets" not in backend_document
+
+
+@pytest.mark.parametrize("field", ["display", "gene_sets"])
+def test_deseq2_d1_rejects_edger_extensions(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    extra: dict[str, object] = {
+        field: (
+            {
+                "fdr_threshold": 0.05,
+                "pca_top_n": 500,
+                "pca_components": [1, 2],
+            }
+            if field == "display"
+            else {}
+        )
+    }
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        deseq2={"test_mode": "wald", "shrinkage": "none"},
+        **extra,
+    )
+
+    with pytest.raises(InvalidRequestError, match="does not support") as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["incompatible_fields"] == [field]
+
+
+def test_deseq2_configuration_is_required(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+    )
+
+    with pytest.raises(InvalidRequestError, match="requires the 'deseq2'"):
+        load_analysis_request(request)
+
+
+@pytest.mark.parametrize(
+    "configuration",
+    [
+        None,
+        {},
+        {"test_mode": "Wald", "shrinkage": "none"},
+        {"test_mode": "wald"},
+        {"test_mode": "wald", "shrinkage": "normal"},
+        {"test_mode": "wald", "shrinkage": {}},
+        {"test_mode": "wald", "shrinkage": "none", "reduced": {}},
+        {"test_mode": "wald", "shrinkage": "none", "unexpected": True},
+    ],
+)
+def test_deseq2_configuration_rejects_noncanonical_wald_shapes(
+    tmp_path: Path,
+    configuration: object,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        deseq2=configuration,
+    )
+
+    with pytest.raises(InvalidRequestError):
+        load_analysis_request(request)
+
+
+def test_deseq2_lrt_accepts_one_zero_threshold_reporting_contrast(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    full_design = {
+        "intercept": True,
+        "terms": ["batch", "condition"],
+        "variables": {
+            "batch": {"type": "factor", "levels": ["one", "two"]},
+            "condition": {"type": "factor", "levels": ["control", "treated"]},
+        },
+    }
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        design=full_design,
+        deseq2={
+            "test_mode": "lrt",
+            "shrinkage": "none",
+            "reduced": {"intercept": True, "terms": ["batch"]},
+        },
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.deseq2 == {
+        "test_mode": "lrt",
+        "shrinkage": "none",
+        "reduced": {"intercept": True, "terms": ["batch"]},
+    }
+
+
+def test_deseq2_lrt_requires_reduced_design(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        deseq2={"test_mode": "lrt", "shrinkage": "none"},
+    )
+
+    with pytest.raises(InvalidRequestError) as caught:
+        load_analysis_request(request)
+
+    assert caught.value.details["missing_keys"] == ["reduced"]
+
+
+def test_deseq2_lrt_rejects_multiple_reporting_contrasts(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        contrasts=[
+            {
+                "contrast_id": "one",
+                "weights": {"conditiontreated": 1},
+                "lfc_threshold": 0,
+            },
+            {
+                "contrast_id": "two",
+                "weights": {"conditiontreated": -1},
+                "lfc_threshold": 0,
+            },
+        ],
+        deseq2={
+            "test_mode": "lrt",
+            "shrinkage": "none",
+            "reduced": {"intercept": True, "terms": []},
+        },
+    )
+
+    with pytest.raises(InvalidRequestError, match="exactly one"):
+        load_analysis_request(request)
+
+
+def test_deseq2_lrt_rejects_lfc_threshold(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        contrasts=[
+            {
+                "contrast_id": "treated_vs_control",
+                "weights": {"conditiontreated": 1},
+                "lfc_threshold": 1,
+            }
+        ],
+        deseq2={
+            "test_mode": "lrt",
+            "shrinkage": "none",
+            "reduced": {"intercept": True, "terms": []},
+        },
+    )
+
+    with pytest.raises(InvalidRequestError, match="cannot use an LFC threshold"):
+        load_analysis_request(request)
+
+
+@pytest.mark.parametrize(
+    "reduced",
+    [
+        {"intercept": False, "terms": []},
+        {"intercept": True, "terms": ["batch", "condition"]},
+        {"intercept": True, "terms": ["unknown"]},
+        {"intercept": True, "terms": ["batch", "batch"]},
+        {"intercept": True, "terms": ["batch"], "unexpected": True},
+    ],
+)
+def test_deseq2_lrt_rejects_non_nested_or_noncanonical_reduced_designs(
+    tmp_path: Path,
+    reduced: object,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        design={
+            "intercept": True,
+            "terms": ["batch", "condition"],
+            "variables": {
+                "batch": {"type": "factor", "levels": ["one", "two"]},
+                "condition": {
+                    "type": "factor",
+                    "levels": ["control", "treated"],
+                },
+            },
+        },
+        deseq2={"test_mode": "lrt", "shrinkage": "none", "reduced": reduced},
+    )
+
+    with pytest.raises(InvalidRequestError):
+        load_analysis_request(request)
+
+
+def test_deseq2_lrt_normalizes_reduced_terms_to_full_design_order(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        design={
+            "intercept": True,
+            "terms": ["batch", "sex", "condition"],
+            "variables": {
+                "batch": {"type": "factor", "levels": ["one", "two"]},
+                "sex": {"type": "factor", "levels": ["female", "male"]},
+                "condition": {
+                    "type": "factor",
+                    "levels": ["control", "treated"],
+                },
+            },
+        },
+        deseq2={
+            "test_mode": "lrt",
+            "shrinkage": "none",
+            "reduced": {"intercept": True, "terms": ["condition", "batch"]},
+        },
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.deseq2 is not None
+    assert validated.deseq2["reduced"]["terms"] == ["batch", "condition"]
+
+
+def test_deseq2_lrt_no_intercept_reduced_design_cannot_be_empty(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        design={
+            "intercept": False,
+            "terms": ["condition"],
+            "variables": {
+                "condition": {
+                    "type": "factor",
+                    "levels": ["control", "treated"],
+                }
+            },
+        },
+        deseq2={
+            "test_mode": "lrt",
+            "shrinkage": "none",
+            "reduced": {"intercept": False, "terms": []},
+        },
+    )
+
+    with pytest.raises(InvalidRequestError, match="must retain at least one term"):
+        load_analysis_request(request)
+
+
+def test_deseq2_apeglm_accepts_exact_positive_single_coefficient_contrasts(
+    tmp_path: Path,
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        deseq2={"test_mode": "wald", "shrinkage": "apeglm"},
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.deseq2 == {"test_mode": "wald", "shrinkage": "apeglm"}
+
+
+def test_deseq2_wald_accepts_formal_positive_lfc_threshold(tmp_path: Path) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights={"conditiontreated": 1},
+        schema_version="1.2",
+        backend="deseq2",
+        contrasts=[
+            {
+                "contrast_id": "treated_vs_control_min_1",
+                "weights": {"conditiontreated": 1},
+                "lfc_threshold": 1,
+            }
+        ],
+        deseq2={"test_mode": "wald", "shrinkage": "none"},
+    )
+
+    validated = load_analysis_request(request)
+
+    assert validated.contrasts[0]["lfc_threshold"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "weights",
+    [
+        {"conditiontreated": -1},
+        {"conditiontreated": 2},
+        {"conditiontreated": 1, "batchtwo": 0},
+        {"(Intercept)": 1},
+        {"Intercept": 1},
+    ],
+)
+def test_deseq2_apeglm_rejects_any_nonexact_coefficient_selection(
+    tmp_path: Path,
+    weights: dict[str, float],
+) -> None:
+    bundle = _validated_bundle(tmp_path)
+    request = _analysis_request(
+        tmp_path,
+        bundle,
+        weights=weights,
+        schema_version="1.2",
+        backend="deseq2",
+        deseq2={"test_mode": "wald", "shrinkage": "apeglm"},
+    )
+
+    with pytest.raises(InvalidRequestError, match="apeglm shrinkage"):
+        load_analysis_request(request)
 
 
 @pytest.mark.parametrize("fdr_threshold", [0, 1])
