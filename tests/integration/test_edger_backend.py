@@ -909,7 +909,7 @@ def _salmon_request(
 
 @pytest.mark.parametrize(
     ("three_prime", "inferential_replicates"),
-    [(False, 0), (False, 2), (True, 0), (True, 1)],
+    [(False, 0), (False, 2), (True, 0), (True, 2)],
 )
 def test_locked_salmon_routes_execute(
     tmp_path: Path,
@@ -941,6 +941,9 @@ def test_locked_salmon_routes_execute(
         assert route["count_source"] == "txi$counts"
         assert route["transcript_length_offset"] is False
         assert route["gene_length_correction"] is False
+        assert route["inferential_replicates_imported"] is (
+            inferential_replicates > 0
+        )
     else:
         assert route["constructor"] == "edgeR::DGEListFromTximport"
         assert route["transcript_length_offset"] is True
