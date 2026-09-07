@@ -30,8 +30,9 @@ machine-verifiable results through a JSON-only command-line interface.
   `|logFC|` filtering.
 - A separate DESeq2 1.52 implementation with Wald tests, formal
   `greaterAbs` LFC-threshold tests, full-versus-reduced LRTs, and optional
-  coefficient-only apeglm shrinkage. Wald and LRT match an independent airway
-  oracle exactly; its simulation calibration remains unresolved.
+  coefficient-only apeglm shrinkage. Wald and LRT were numerically exact in
+  the archived same-engine airway oracle, but the tested compcodeR scenario
+  failed its predeclared calibration limits, so this path remains ungated.
 - Explicit `filtered` and `tested` statuses in successful result bundles;
   design, contrast, and backend failures publish no partial bundle.
 - Stable JSON responses and error codes suitable for shell automation and
@@ -174,13 +175,20 @@ validate every possible study design. A combined featureCounts manifest is
 self-attested: the toolkit verifies and binds its declared bytes, but cannot
 prove who produced them.
 
-The DESeq2 implementation is intentionally listed as gate-pending rather than
-evidence-gated. Its public-chain airway Wald/LRT oracle passes, including
-omnibus LRT P values and FDR, but a predeclared 20-replicate compcodeR
-exploration observed mean FDP 0.1182 at nominal BH FDR 0.05 and exceeded the
-0.065 candidate limit. Direct DESeq2 reproduced the result, the held-out grid
-was not run, and the limits were not relaxed. The machine report and audit are
-under [`tests/simulation/`](tests/simulation/). Interactions, splines, random
+The DESeq2 implementation remains a research-preview ungated path. Its
+public-chain [airway Wald/LRT oracle](tests/oracle/deseq2-airway-benchmark-report.json)
+(`airway-deseq2-wald-lrt-same-engine-v1`) passed with zero observed numeric
+difference for the compared coefficient, logFC, statistic, P-value, and FDR
+values, including omnibus LRT P values. This establishes same-engine
+implementation fidelity in that archived run, not calibration.
+
+The separate [compcodeR exploratory report](tests/simulation/deseq2-compcoder-exploratory-report.json)
+(`compcoder-deseq2-nb-exploratory-v1`) observed mean/worst replicate FDP
+0.1182/0.1373 at nominal BH FDR 0.05, exceeding the predeclared limits
+0.065/0.12 in the tested 6-vs-6 negative-binomial scenario. Direct DESeq2
+reproduced the result; the held-out grid was not run, and the thresholds were
+not relaxed. The [method audit](tests/simulation/deseq2-compcoder-method.md)
+records the design and failure disclosure. Interactions, splines, random
 effects, repeated-measure models, GSEA/fgsea, DTU, network analysis, activity
 inference, and other differential-expression backends remain outside the
 evidence-gated path. The retained

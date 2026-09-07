@@ -196,12 +196,28 @@ def test_capabilities_is_one_json_document_on_stdout(run_module_cli) -> None:
     ]
     assert document["data"]["certified_analysis_paths"] == []
     ungated = document["data"]["implemented_ungated_analysis_paths"]
-    assert [path["path_id"] for path in ungated] == [
-        "deseq2_p1_v1_gate_pending"
-    ]
-    assert ungated[0]["gate_status"] == "pending_D2"
+    assert [path["path_id"] for path in ungated] == ["deseq2_p1_v1_gate_pending"]
+    assert ungated[0]["gate_status"] == (
+        "failed_compcoder_nb_calibration_in_tested_scenario"
+    )
     assert ungated[0]["evidence_gated"] is False
     assert ungated[0]["benchmark_evidence"] == []
+    disclosures = ungated[0]["evidence_disclosures"]
+    oracle = disclosures["same_engine_numerical_fidelity"]
+    assert oracle["status"] == "pass_exact_in_archived_run"
+    assert oracle["benchmark_id"] == "airway-deseq2-wald-lrt-same-engine-v1"
+    assert oracle["modes"] == ["wald", "lrt"]
+    assert oracle["report_path"] == ("tests/oracle/deseq2-airway-benchmark-report.json")
+    calibration = disclosures["negative_binomial_calibration"]
+    assert calibration["status"] == ("failed_predeclared_limits_in_tested_scenario")
+    assert calibration["benchmark_id"] == "compcoder-deseq2-nb-exploratory-v1"
+    assert calibration["report_path"] == (
+        "tests/simulation/deseq2-compcoder-exploratory-report.json"
+    )
+    assert calibration["method_audit_path"] == (
+        "tests/simulation/deseq2-compcoder-method.md"
+    )
+    assert calibration["held_out_seeds_run"] is False
     paths = document["data"]["evidence_gated_analysis_paths"]
     assert [path["path_id"] for path in paths] == [
         "edger_ql_p0_v1",

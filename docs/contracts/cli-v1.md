@@ -6,10 +6,11 @@ present, are written to standard error. The equivalent module entry point is
 `python -m rnaseq_downstream`.
 
 This contract covers the checkpoint-A input gate, the evidence-gated edgeR v4
-QL path, and the D1 implementation of the separate DESeq2 path. The DESeq2
-path remains explicitly gate-pending until its own D2 oracle and simulation
-evidence exists. The toolkit remains a research preview: no CLI result is a
-claim that a study or conclusion is publication-ready.
+QL path, and the separate research-preview DESeq2 path. The DESeq2 path has a
+passing same-engine airway oracle but failed the predeclared calibration
+limits in the tested compcodeR negative-binomial scenario, so it remains
+ungated. The toolkit remains a research preview: no CLI result is a claim that
+a study or conclusion is publication-ready.
 
 ## Response envelope
 
@@ -108,13 +109,17 @@ extension documented here.
   `limma_camera` as a supplementary competitive result. Those classes are
   separate machine fields and must not be interpreted as one ranked list.
   `implemented_ungated_analysis_paths` separately reports
-  `deseq2_p1_v1_gate_pending`, including its locked runtime, supported test and
-  shrinkage modes, empty benchmark-evidence list, and `evidence_gated: false`.
-  Its presence is an implementation statement, not certification. The DESeq2
-  airway Wald/LRT oracle has passed, but the disclosed compcodeR exploration
-  exceeded the predeclared FDP limits and the held-out grid was not run. The
-  machine capability remains gate-pending and does not list partial evidence as
-  a completed gate pair.
+  `deseq2_p1_v1_gate_pending`, a historical stable path identifier retained for
+  receipt compatibility. Its authoritative status fields report a
+  research-preview path, `evidence_gated: false`, and
+  `gate_status: "failed_compcoder_nb_calibration_in_tested_scenario"`; the
+  empty `benchmark_evidence` list means no complete passing gate pair.
+  `evidence_disclosures` separately identifies the numerically exact archived
+  Wald/LRT same-engine oracle
+  `airway-deseq2-wald-lrt-same-engine-v1` and the failed exploration
+  `compcoder-deseq2-nb-exploratory-v1`, with repository paths to their JSON
+  reports and method audit. The held-out grid was not run. These disclosure
+  records must not be interpreted as evidence-gated certification.
 - `inspect --request REQUEST.json` resolves, fingerprints, and structurally
   inspects one declared input request without writing files. Because full count
   numeric-domain validation is intentionally not run, its scope says
@@ -143,7 +148,7 @@ extension documented here.
   provenance (or JSON `null` for a version 1.0 run). A gene-set run adds a
   `pathways` completion object; older runs do not gain a null placeholder. A
   DESeq2 success identifies its test mode, shrinkage policy, explicit defaults,
-  input constructor, inferential-replicate use, and count-rounding audit. D1
+  input constructor, inferential-replicate use, and count-rounding audit. It
   rejects `display` and `gene_sets` for DESeq2 instead of ignoring them.
 - `summarize --run-dir DIRECTORY` independently verifies a public result
   bundle and returns per-contrast status and FDR-at-0.05 counts. When a display
@@ -244,7 +249,7 @@ cross-checked against the private-copy input evidence.
 
 A version 1.2 DESeq2 run has a distinct manifest and exact TSV schema but uses
 the same five public filenames. It never carries an edgeR display or pathway
-sidecar in D1. For full-length Salmon, provenance records that
+sidecar. For full-length Salmon, provenance records that
 `DESeqDataSetFromTximport` internally uses R `round()` while preserving the
 tximport length correction. For three-prime Salmon, the backend explicitly
 applies R `round()` before `DESeqDataSetFromMatrix`, with no length offset.
@@ -309,7 +314,7 @@ error, never a skip or warning.
 The current P0/C1/C2 fallback is the append-only snapshot
 `environment/snapshots/p0-c1-c2-c6b6cd9/`, whose `manifest.json` uses schema
 `rnaseq-downstream-environment-snapshot-v1`. This historical lookup does not
-weaken current-runtime validation or promote a gate-pending backend into
+weaken current-runtime validation or promote the ungated DESeq2 backend into
 `evidence_gated_analysis_paths`.
 
 Every environment expansion must also be proved compatible in the new clean

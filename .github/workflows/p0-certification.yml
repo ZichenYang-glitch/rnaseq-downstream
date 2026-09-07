@@ -67,6 +67,8 @@ jobs:
         env:
           RNASEQ_P0_REQUIRE_BENCHMARKS: "1"
           RNASEQ_P0_RSCRIPT: ${{ github.workspace }}/.ci/rnaseq-downstream-p0/bin/Rscript
+        # The DESeq2 module below checks the archived exploratory disclosure and
+        # fail-closed mechanics; it cannot execute the sealed held-out seed grid.
         run: >-
           conda run --prefix "$P0_PREFIX" --no-capture-output
           python -m pytest

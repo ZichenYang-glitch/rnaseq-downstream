@@ -184,7 +184,28 @@ def _capabilities(_arguments: argparse.Namespace) -> dict[str, Any]:
                 "test_modes": ["wald", "lrt"],
                 "shrinkage": ["none", "apeglm_coef_only"],
                 "benchmark_evidence": [],
-                "gate_status": "pending_D2",
+                "evidence_disclosures": {
+                    "same_engine_numerical_fidelity": {
+                        "status": "pass_exact_in_archived_run",
+                        "benchmark_id": ("airway-deseq2-wald-lrt-same-engine-v1"),
+                        "modes": ["wald", "lrt"],
+                        "report_path": (
+                            "tests/oracle/deseq2-airway-benchmark-report.json"
+                        ),
+                    },
+                    "negative_binomial_calibration": {
+                        "status": "failed_predeclared_limits_in_tested_scenario",
+                        "benchmark_id": "compcoder-deseq2-nb-exploratory-v1",
+                        "report_path": (
+                            "tests/simulation/deseq2-compcoder-exploratory-report.json"
+                        ),
+                        "method_audit_path": (
+                            "tests/simulation/deseq2-compcoder-method.md"
+                        ),
+                        "held_out_seeds_run": False,
+                    },
+                },
+                "gate_status": ("failed_compcoder_nb_calibration_in_tested_scenario"),
                 "evidence_gated": False,
                 "publication_grade_claim": False,
             }
@@ -454,8 +475,11 @@ def _run_deseq2(arguments: argparse.Namespace) -> _CommandResult:
             "input_semantics": "passed",
             "design": "passed",
             "backend": "passed",
-            "evidence_status": "implementation_complete_gate_pending",
-            "benchmark_scope": "not_run_D2_pending",
+            "evidence_status": ("same_engine_oracle_passed_calibration_gate_failed"),
+            "benchmark_scope": (
+                "airway_numerical_fidelity_passed_compcoder_nb_calibration_"
+                "failed_in_tested_scenario"
+            ),
             "input_route_evidence": (
                 "validation_contract_plus_locked_integration_tests"
             ),

@@ -41,7 +41,26 @@ def test_capabilities_exposes_v11_display_and_gated_pathways() -> None:
             "test_modes": ["wald", "lrt"],
             "shrinkage": ["none", "apeglm_coef_only"],
             "benchmark_evidence": [],
-            "gate_status": "pending_D2",
+            "evidence_disclosures": {
+                "same_engine_numerical_fidelity": {
+                    "status": "pass_exact_in_archived_run",
+                    "benchmark_id": "airway-deseq2-wald-lrt-same-engine-v1",
+                    "modes": ["wald", "lrt"],
+                    "report_path": ("tests/oracle/deseq2-airway-benchmark-report.json"),
+                },
+                "negative_binomial_calibration": {
+                    "status": "failed_predeclared_limits_in_tested_scenario",
+                    "benchmark_id": "compcoder-deseq2-nb-exploratory-v1",
+                    "report_path": (
+                        "tests/simulation/deseq2-compcoder-exploratory-report.json"
+                    ),
+                    "method_audit_path": (
+                        "tests/simulation/deseq2-compcoder-method.md"
+                    ),
+                    "held_out_seeds_run": False,
+                },
+            },
+            "gate_status": ("failed_compcoder_nb_calibration_in_tested_scenario"),
             "evidence_gated": False,
             "publication_grade_claim": False,
         }
@@ -388,10 +407,7 @@ def test_run_exposes_pathway_completion_only_when_present(
     )
 
     assert result.data["pathways"] == pathway_completion
-    assert (
-        result.data["scope"]["analysis_path"]
-        == "edger_ql_p0_v1_limma_gene_sets_v1"
-    )
+    assert result.data["scope"]["analysis_path"] == "edger_ql_p0_v1_limma_gene_sets_v1"
 
 
 @pytest.mark.unit
@@ -450,9 +466,7 @@ def test_run_dispatches_deseq2_without_claiming_gate_evidence(
             "data": {
                 "runtime_identity": {"DESeq2": "1.52.0"},
                 "input_semantics": "featurecounts_integer",
-                "route_observed": {
-                    "constructor": "DESeq2::DESeqDataSetFromMatrix"
-                },
+                "route_observed": {"constructor": "DESeq2::DESeqDataSetFromMatrix"},
                 "design_columns": ["(Intercept)", "conditiontreated"],
                 "design_rank": 2,
                 "residual_df": 4,
@@ -489,8 +503,13 @@ def test_run_dispatches_deseq2_without_claiming_gate_evidence(
     assert envelope["data"]["backend"] == "DESeq2"
     scope = envelope["data"]["scope"]
     assert scope["analysis_path"] == "deseq2_p1_v1_gate_pending"
-    assert scope["evidence_status"] == "implementation_complete_gate_pending"
-    assert scope["benchmark_scope"] == "not_run_D2_pending"
+    assert scope["evidence_status"] == (
+        "same_engine_oracle_passed_calibration_gate_failed"
+    )
+    assert scope["benchmark_scope"] == (
+        "airway_numerical_fidelity_passed_compcoder_nb_calibration_"
+        "failed_in_tested_scenario"
+    )
     assert scope["publication_grade_claim"] is False
     assert captured.err == "DESeq2 diagnostic\n"
 

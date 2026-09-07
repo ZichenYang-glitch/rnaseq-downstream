@@ -646,7 +646,11 @@ def test_locked_public_cli_executes_and_verifies_deseq2(
     assert response["data"]["backend"] == "DESeq2"
     assert response["data"]["scope"]["analysis_path"] == ("deseq2_p1_v1_gate_pending")
     assert response["data"]["scope"]["evidence_status"] == (
-        "implementation_complete_gate_pending"
+        "same_engine_oracle_passed_calibration_gate_failed"
+    )
+    assert response["data"]["scope"]["benchmark_scope"] == (
+        "airway_numerical_fidelity_passed_compcoder_nb_calibration_"
+        "failed_in_tested_scenario"
     )
     assert response["data"]["scope"]["publication_grade_claim"] is False
     assert len(response["artifacts"]) == 5

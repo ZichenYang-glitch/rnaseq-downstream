@@ -288,12 +288,22 @@ public request schema identity but otherwise retains the same renderer and
 verification rules.
 
 For `backend: "deseq2"`, `deseq2` is required and has an exact conditional
-schema. The D1 DESeq2 path rejects `display` and `gene_sets`; those fields are
-not silently ignored. DESeq2 does not enter
-`evidence_gated_analysis_paths` until its independent oracle and simulation
-gates pass in D2. The airway Wald/LRT oracle currently passes, while the
-predeclared compcodeR exploration exceeds its candidate FDP limits; no
-held-out certification report has been created and the path remains ungated.
+schema. The version 1.2 DESeq2 path rejects `display` and `gene_sets`; those
+fields are not silently ignored. DESeq2 is a research-preview ungated path and
+is not in `evidence_gated_analysis_paths`. The archived public-chain airway oracle
+`airway-deseq2-wald-lrt-same-engine-v1` reports numerically exact Wald and LRT
+agreement, including omnibus LRT P values and FDR, between the toolkit and an
+independent direct DESeq2 run. This is evidence of same-engine implementation
+fidelity in that archived run, not evidence of calibration.
+
+The separate exploratory report `compcoder-deseq2-nb-exploratory-v1` failed
+the predeclared mean/worst replicate FDP limits in its tested compcodeR
+negative-binomial scenario. Thresholds were not relaxed and the disjoint
+held-out seed grid was not run. The authoritative artifacts are
+[`deseq2-airway-benchmark-report.json`](../../tests/oracle/deseq2-airway-benchmark-report.json),
+[`deseq2-compcoder-exploratory-report.json`](../../tests/simulation/deseq2-compcoder-exploratory-report.json),
+and the
+[`DESeq2 compcodeR method audit`](../../tests/simulation/deseq2-compcoder-method.md).
 
 ### DESeq2 Wald requests
 
