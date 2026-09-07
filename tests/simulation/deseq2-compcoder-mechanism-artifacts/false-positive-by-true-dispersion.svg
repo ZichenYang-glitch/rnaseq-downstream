@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520">
+<rect width="900" height="520" fill="white"/>
+<text x="450" y="34" text-anchor="middle" font-family="sans-serif" font-size="20">DESeq2 Wald false positives by within-seed true-dispersion quintile</text>
+<line x1="90" y1="70" x2="90" y2="410" stroke="#222"/>
+<line x1="90" y1="410" x2="870" y2="410" stroke="#222"/>
+<line x1="90" y1="410.000" x2="870" y2="410.000" stroke="#ddd"/>
+<text x="80" y="414.000" text-anchor="end" font-family="sans-serif" font-size="12">0.00</text>
+<line x1="90" y1="342.000" x2="870" y2="342.000" stroke="#ddd"/>
+<text x="80" y="346.000" text-anchor="end" font-family="sans-serif" font-size="12">0.10</text>
+<line x1="90" y1="274.000" x2="870" y2="274.000" stroke="#ddd"/>
+<text x="80" y="278.000" text-anchor="end" font-family="sans-serif" font-size="12">0.20</text>
+<line x1="90" y1="206.000" x2="870" y2="206.000" stroke="#ddd"/>
+<text x="80" y="210.000" text-anchor="end" font-family="sans-serif" font-size="12">0.30</text>
+<line x1="90" y1="138.000" x2="870" y2="138.000" stroke="#ddd"/>
+<text x="80" y="142.000" text-anchor="end" font-family="sans-serif" font-size="12">0.40</text>
+<line x1="90" y1="70.000" x2="870" y2="70.000" stroke="#ddd"/>
+<text x="80" y="74.000" text-anchor="end" font-family="sans-serif" font-size="12">0.50</text>
+<rect x="111.840" y="354.046" width="56.160" height="55.954" fill="#b33c3c"/>
+<rect x="168.000" y="403.366" width="56.160" height="6.634" fill="#4666a5"/>
+<text x="168.000" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">Q1_lowest</text>
+<rect x="267.840" y="326.069" width="56.160" height="83.931" fill="#b33c3c"/>
+<rect x="324.000" y="400.049" width="56.160" height="9.951" fill="#4666a5"/>
+<text x="324.000" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">Q2_low</text>
+<rect x="423.840" y="287.211" width="56.160" height="122.789" fill="#b33c3c"/>
+<rect x="480.000" y="395.442" width="56.160" height="14.558" fill="#4666a5"/>
+<text x="480.000" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">Q3_middle</text>
+<rect x="579.840" y="256.903" width="56.160" height="153.097" fill="#b33c3c"/>
+<rect x="636.000" y="391.848" width="56.160" height="18.152" fill="#4666a5"/>
+<text x="636.000" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">Q4_high</text>
+<rect x="735.840" y="145.771" width="56.160" height="264.229" fill="#b33c3c"/>
+<rect x="792.000" y="378.672" width="56.160" height="31.328" fill="#4666a5"/>
+<text x="792.000" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">Q5_highest</text>
+<text x="18" y="240.000" transform="rotate(-90 18 240.000)" text-anchor="middle" font-family="sans-serif" font-size="14">fraction</text>
+<rect x="90" y="474" width="16" height="16" fill="#b33c3c"/>
+<text x="113" y="487" font-family="sans-serif" font-size="13">share of all false positives</text>
+<rect x="350" y="474" width="16" height="16" fill="#4666a5"/>
+<text x="373" y="487" font-family="sans-serif" font-size="13">contribution to pooled FDP</text>
+</svg>

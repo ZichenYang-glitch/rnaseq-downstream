@@ -188,7 +188,10 @@ The separate [compcodeR exploratory report](tests/simulation/deseq2-compcoder-ex
 0.065/0.12 in the tested 6-vs-6 negative-binomial scenario. Direct DESeq2
 reproduced the result; the held-out grid was not run, and the thresholds were
 not relaxed. The [method audit](tests/simulation/deseq2-compcoder-method.md)
-records the design and failure disclosure. Interactions, splines, random
+records the design and failure disclosure. A separate
+[read-only mechanism diagnostic](tests/simulation/deseq2-compcoder-mechanism-diagnostic.md)
+reuses only the disclosed exploratory seeds for hypothesis generation.
+Interactions, splines, random
 effects, repeated-measure models, GSEA/fgsea, DTU, network analysis, activity
 inference, and other differential-expression backends remain outside the
 evidence-gated path. The retained

@@ -71,3 +71,13 @@ were not relaxed. See the
 [`DESeq2 method and audit`](deseq2-compcoder-method.md) and adjacent exploratory
 JSON report. These are failure-disclosure evidence, not a passing simulation
 gate and not grounds to promote DESeq2 into an evidence-gated path.
+
+The adjacent
+[`mechanism diagnostic`](deseq2-compcoder-mechanism-diagnostic.md) and its
+[machine-readable JSON](deseq2-compcoder-mechanism-diagnostic.json) reuse only
+the disclosed exploratory seeds. They examine dispersion fitting,
+true-dispersion strata, independent filtering, Wald versus LRT, and a common
+tested gene family for DESeq2 and edgeR. The two SVG figures and six TSV audit
+tables are hash-bound by the JSON report. This is hypothesis-generating
+evidence, not a new gate or a pre-registered applicability boundary; the
+held-out grid was not an input.

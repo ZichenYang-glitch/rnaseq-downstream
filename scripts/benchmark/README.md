@@ -162,6 +162,13 @@ its passing status means that the disclosed execution completed, not that FDR
 calibration passed. The detailed audit is in
 [`tests/simulation/deseq2-compcoder-method.md`](../../tests/simulation/deseq2-compcoder-method.md).
 
+`run_deseq2_compcoder_mechanism_diagnostic.py` is a separate read-only
+hypothesis-generation runner. It accepts no simulation mode, enumerates only
+the disclosed exploratory seeds, verifies regenerated fixture hashes against
+the exploratory report, and writes the adjacent diagnostic JSON, Markdown,
+SVG, and TSV artifacts under `tests/simulation/`. It does not change or apply a
+gate and does not consume the held-out grid.
+
 ## Reports
 
 After their declared runtime and report destination can be opened, the runners
@@ -175,20 +182,30 @@ environment specification, and runtime verifier by SHA-256. Reports contain no
 NaN or Infinity values. A report with `status: "pass"` is evidence only for its
 named benchmark and locked runtime.
 
-The checked-in report names are:
+The checked-in benchmark-schema report names are:
 
 - `tests/oracle/airway-benchmark-report.json`;
 - `tests/oracle/deseq2-airway-benchmark-report.json`;
 - `tests/oracle/pathway-airway-benchmark-report.json`;
 - `tests/simulation/compcoder-benchmark-report.json`;
-- `tests/simulation/deseq2-compcoder-exploratory-report.json`; and
+- `tests/simulation/deseq2-compcoder-exploratory-report.json`;
 - `tests/simulation/pathway-compcoder-benchmark-report.json`.
+
+The separate
+`tests/simulation/deseq2-compcoder-mechanism-diagnostic.json` uses
+`rnaseq-downstream-diagnostic-report-v1`; it is a hypothesis-generation record,
+not a benchmark-schema gate report.
 
 The C2 pathway simulation also has a
 [human-readable scope report](../../tests/simulation/pathway-compcoder-benchmark-report.md)
 covering its independent-gene model and the binomial operating characteristics
 of the complete-null cutoff. It is interpretation documentation; the adjacent
 JSON remains the authoritative runner-generated evidence.
+
+The DESeq2 exploration also has a
+[mechanism diagnostic](../../tests/simulation/deseq2-compcoder-mechanism-diagnostic.md)
+whose adjacent JSON is authoritative. Its plots and tables are diagnostic
+artifacts, not certification evidence.
 
 The pytest modules under `tests/oracle` and `tests/simulation` invoke passing
 live gates when `RNASEQ_P0_R_LIBRARY` points at the restored locked library. If
