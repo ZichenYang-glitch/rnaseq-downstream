@@ -352,6 +352,15 @@ effect direction and `logFC`; it does not turn the omnibus P value into a Wald
 contrast P value. This separation is recorded in result metadata and checked
 by `summarize`.
 
+DESeq2 1.52.0 reports the raw fitted difference in deviance. For low-count
+genes, the independently converged full and reduced optimizations can therefore
+produce a small negative `statistic`; DESeq2 passes that value to the
+chi-squared tail calculation, which returns `PValue=1`. The toolkit preserves
+this upstream value rather than clamping it. `summarize` accepts a negative LRT
+statistic only when its raw P value is exactly one and its FDR is either missing
+after independent filtering or exactly one; every other negative-statistic
+combination fails integrity verification.
+
 ### DESeq2 LFC shrinkage
 
 `shrinkage` may be exactly `none` or `apeglm`. The `apeglm` route calls

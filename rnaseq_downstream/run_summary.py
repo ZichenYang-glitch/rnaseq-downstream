@@ -2453,8 +2453,20 @@ def _verify_deseq2_results(
                 )
         if parsed["lfcSE"] is not None and parsed["lfcSE"] < 0:
             raise _integrity("A DESeq2 LFC standard error is negative.", row=row_number)
-        if test["mode"] == "lrt" and parsed["statistic"] is not None and parsed["statistic"] < 0:
-            raise _integrity("A DESeq2 LRT statistic is negative.", row=row_number)
+        if (
+            test["mode"] == "lrt"
+            and parsed["statistic"] is not None
+            and parsed["statistic"] < 0
+            and (
+                parsed["PValue"] != 1
+                or parsed["FDR"] not in {None, 1}
+            )
+        ):
+            raise _integrity(
+                "A negative raw DESeq2 LRT statistic must carry PValue=1 "
+                "and either missing or unit FDR.",
+                row=row_number,
+            )
 
         if test["shrinkage"] == "none":
             if (parsed["unshrunk_logFC"] is None) != (parsed["logFC"] is None) or (

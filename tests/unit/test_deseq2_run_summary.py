@@ -705,6 +705,41 @@ def test_summarize_verifies_deseq2_lrt_omnibus_semantics(tmp_path: Path) -> None
 
 
 @pytest.mark.unit
+def test_deseq2_lrt_preserves_negative_raw_deviance_with_unit_pvalue(
+    tmp_path: Path,
+) -> None:
+    run_dir = _bundle(tmp_path, mode="lrt")
+    path = run_dir / "results.tsv"
+    content = path.read_text(encoding="utf-8").replace(
+        "0.3\t0.83\tLRT\tfull_vs_reduced_omnibus\t0.001\t\t",
+        "0.3\t-0.003\tLRT\tfull_vs_reduced_omnibus\t1\t\t",
+    )
+    path.write_text(content, encoding="utf-8")
+    _refresh_manifest(run_dir)
+
+    summary = summarize_run(run_dir)
+
+    assert summary["status"] == "verified_complete"
+
+
+@pytest.mark.unit
+def test_deseq2_lrt_rejects_negative_deviance_with_nonunit_pvalue(
+    tmp_path: Path,
+) -> None:
+    run_dir = _bundle(tmp_path, mode="lrt")
+    path = run_dir / "results.tsv"
+    content = path.read_text(encoding="utf-8").replace(
+        "0.3\t0.83\tLRT\tfull_vs_reduced_omnibus\t0.001\t\t",
+        "0.3\t-0.003\tLRT\tfull_vs_reduced_omnibus\t0.001\t\t",
+    )
+    path.write_text(content, encoding="utf-8")
+    _refresh_manifest(run_dir)
+
+    with pytest.raises(InputIntegrityError, match="negative raw DESeq2 LRT"):
+        summarize_run(run_dir)
+
+
+@pytest.mark.unit
 def test_deseq2_lrt_rejects_wald_statistic_label(tmp_path: Path) -> None:
     run_dir = _bundle(tmp_path, mode="lrt")
     path = run_dir / "results.tsv"
