@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   locked-oracle-and-simulation:
-    name: Locked edgeR oracle and simulation gates
+    name: Locked evidence gates and calibration diagnostics
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
@@ -62,7 +62,7 @@ jobs:
           Rscript --vanilla environment/verify.R
           --library "$RNASEQ_P0_R_LIBRARY"
 
-      - name: Run non-skippable P0 and C2 certification tests
+      - name: Run non-skippable certification and calibration tests
         shell: bash -el {0}
         env:
           RNASEQ_P0_REQUIRE_BENCHMARKS: "1"
@@ -73,8 +73,10 @@ jobs:
           tests/unit tests/integration
           tests/oracle/test_benchmark_report_schema.py
           tests/oracle/test_airway_oracle.py
+          tests/oracle/test_deseq2_airway_oracle.py
           tests/oracle/test_pathway_airway_oracle.py
           tests/simulation/test_compcoder_gate.py
+          tests/simulation/test_deseq2_compcoder_gate.py
           tests/simulation/test_pathway_compcoder_gate.py
           -v
 
@@ -90,7 +92,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          # Includes P0/C2 reports and the environment-compatibility report.
+          # Includes passing live gates and the environment-compatibility report.
           name: p0-benchmark-reports
           path: benchmark-results/*.json
           if-no-files-found: error

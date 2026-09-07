@@ -54,3 +54,20 @@ miscalibration, not a sensitive test for mild inflation.
 
 As with the P0 simulation, all matrices use the private benchmark-kernel scope.
 No featureCounts provenance or public-input-route claim is made.
+
+## P1 DESeq2 exploration: calibration gate not released
+
+The D2 DESeq2 study uses a separate 20-replicate exploratory grid and reserves
+a disjoint 20-replicate grid for held-out certification. Unlike the historical
+P0 gate, every exploratory replicate traverses public `inspect -> validate ->
+run -> summarize` using a typed, self-attested synthetic integer matrix.
+
+The predeclared candidate limits were mean/worst FDP at most 0.065/0.12 and
+mean/worst TPR at least 0.45/0.35. Exploration observed mean/worst FDP
+0.11821/0.13731 and mean/worst TPR 0.65050/0.61800. Independent direct DESeq2
+and BH calculations reproduced the toolkit results, so the excess could not be
+attributed to routing or scoring. The held-out grid was not run and the limits
+were not relaxed. See the
+[`DESeq2 method and audit`](deseq2-compcoder-method.md) and adjacent exploratory
+JSON report. These are failure-disclosure evidence, not a passing simulation
+gate and not grounds to promote DESeq2 into an evidence-gated path.

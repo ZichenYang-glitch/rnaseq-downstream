@@ -291,7 +291,9 @@ For `backend: "deseq2"`, `deseq2` is required and has an exact conditional
 schema. The D1 DESeq2 path rejects `display` and `gene_sets`; those fields are
 not silently ignored. DESeq2 does not enter
 `evidence_gated_analysis_paths` until its independent oracle and simulation
-gates pass in D2.
+gates pass in D2. The airway Wald/LRT oracle currently passes, while the
+predeclared compcodeR exploration exceeds its candidate FDP limits; no
+held-out certification report has been created and the path remains ungated.
 
 ### DESeq2 Wald requests
 

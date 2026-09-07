@@ -110,7 +110,11 @@ extension documented here.
   `implemented_ungated_analysis_paths` separately reports
   `deseq2_p1_v1_gate_pending`, including its locked runtime, supported test and
   shrinkage modes, empty benchmark-evidence list, and `evidence_gated: false`.
-  Its presence is an implementation statement, not certification.
+  Its presence is an implementation statement, not certification. The DESeq2
+  airway Wald/LRT oracle has passed, but the disclosed compcodeR exploration
+  exceeded the predeclared FDP limits and the held-out grid was not run. The
+  machine capability remains gate-pending and does not list partial evidence as
+  a completed gate pair.
 - `inspect --request REQUEST.json` resolves, fingerprints, and structurally
   inspects one declared input request without writing files. Because full count
   numeric-domain validation is intentionally not run, its scope says

@@ -38,3 +38,19 @@ or numerical drift between the independently written paths, but it does not
 validate limma's methods against an external statistical implementation. Like
 the P0 oracle, it enters through the private benchmark adapter and does not
 certify featureCounts origin or the public input route.
+
+## P1 DESeq2 Wald/LRT public-chain oracle
+
+The DESeq2 oracle serializes the same airway assay into a typed, self-attested
+integer-matrix fixture, then runs the public `inspect -> validate -> run ->
+summarize` chain for both Wald and LRT requests. An independent R script runs
+DESeq2 1.52.0 directly on the identical serialized counts and paired
+`~ cell + dex` design. It compares the reporting contrast for Wald and the
+same reporting effect for an omnibus LRT against reduced `~ cell`.
+
+For each mode, fitted coefficients, log fold changes, statistics, raw P values,
+and FDR values must satisfy `rtol=1e-6` and `atol=1e-10`; the archived run is
+exact across all compared values. LRT semantics are separately asserted so its
+omnibus P value cannot be relabeled as a contrast-specific test. The typed
+fixture proves public routing and numerical parity, but its producer manifest
+is self-attested and does not authenticate featureCounts origin.

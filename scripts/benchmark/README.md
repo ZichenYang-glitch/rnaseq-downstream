@@ -1,17 +1,23 @@
 # Locked certification benchmark runners
 
-These runners create machine-readable evidence for the locked edgeR/limma
-statistical backend.
+These runners create machine-readable evidence for the locked edgeR/limma and
+DESeq2 statistical backends.
 They are deliberately separate from the public CLI and must be run with the
 same P0 Conda prefix and R library as the toolkit backend.
 
-All four gates in this directory are **backend-kernel** gates. The locked
+The four historical edgeR/limma gates in this directory are
+**backend-kernel** gates. The locked
 `airway` object contains integer counts, but this repository does not claim that
 its packaged object is accompanied by the toolkit's required featureCounts
 origin evidence. The compcodeR matrices are synthetic negative-binomial counts,
 not featureCounts outputs. Consequently, no benchmark fabricates a featureCounts
 manifest and no report certifies the public input route. They enter the backend
 through a private benchmark adapter that is unreachable from the public CLI.
+
+The newer DESeq2 runners instead exercise the public CLI with explicitly
+self-attested benchmark manifests. This proves numerical routing through
+`inspect -> validate -> run -> summarize`, but still does not authenticate the
+producer origin of airway serialization or synthetic compcodeR counts.
 
 ## Airway same-engine oracle
 
@@ -123,10 +129,43 @@ which can induce Monte Carlo dependence and further limits that inference.
 Camera is excluded from this self-contained FDR/TPR gate and is covered by the
 airway pathway oracle instead.
 
+## Airway DESeq2 Wald/LRT same-engine oracle
+
+`run_deseq2_airway_oracle.py` serializes the locked airway assay as a typed,
+self-attested integer-matrix fixture and exercises the complete public CLI for
+both Wald and LRT requests. `run_deseq2_airway_direct_oracle.R` independently
+runs DESeq2 1.52.0 on the same bytes with the paired `~ cell + dex` design; the
+LRT uses reduced `~ cell` and retains one reporting effect without treating it
+as the omnibus hypothesis.
+
+The gate requires identical tested-gene sets and compares all fitted
+coefficients, log fold changes, statistics, raw P values, and FDR values with
+`rtol=1e-6` and `atol=1e-10`. The archived report passes both modes, including
+the LRT omnibus P-value/FDR fields. Its scope is same-engine numerical parity
+and public routing, not external validation of DESeq2 or proof of featureCounts
+origin.
+
+## DESeq2 compcodeR exploration: blocked calibration gate
+
+`run_deseq2_compcoder_gate.py` defines disjoint exploratory seeds 61001--61020
+and held-out seeds 62001--62020 for the public DESeq2 Wald route. Before the
+exploratory grid was inspected, the runner fixed candidate limits of mean/worst
+FDP at most 0.065/0.12 and mean/worst TPR at least 0.45/0.35.
+
+The exploration completed all 20 public CLI chains but observed mean/worst FDP
+0.11821/0.13731 at nominal BH FDR 0.05. Direct DESeq2 and independent BH
+recalculation reproduced the result. Because this contradicted the expected
+conservative behavior and the candidate bounds, the held-out grid was not run,
+the limits were not relaxed, and no certification report exists. The archived
+exploratory JSON has `evidence_role=threshold_selection_only_not_certification`;
+its passing status means that the disclosed execution completed, not that FDR
+calibration passed. The detailed audit is in
+[`tests/simulation/deseq2-compcoder-method.md`](../../tests/simulation/deseq2-compcoder-method.md).
+
 ## Reports
 
-After their declared runtime and report destination can be opened, all four
-runners write a strict JSON report conforming to
+After their declared runtime and report destination can be opened, the runners
+write strict JSON reports conforming to
 `benchmark-report-v1.schema.json` for either a passing gate or an execution/gate
 failure. Argument-parsing and unreadable-runtime failures can occur before a
 report can be initialized. The report records runtime versions, exact input
@@ -139,8 +178,10 @@ named benchmark and locked runtime.
 The checked-in report names are:
 
 - `tests/oracle/airway-benchmark-report.json`;
+- `tests/oracle/deseq2-airway-benchmark-report.json`;
 - `tests/oracle/pathway-airway-benchmark-report.json`;
 - `tests/simulation/compcoder-benchmark-report.json`;
+- `tests/simulation/deseq2-compcoder-exploratory-report.json`; and
 - `tests/simulation/pathway-compcoder-benchmark-report.json`.
 
 The C2 pathway simulation also has a
@@ -149,14 +190,16 @@ covering its independent-gene model and the binomial operating characteristics
 of the complete-null cutoff. It is interpretation documentation; the adjacent
 JSON remains the authoritative runner-generated evidence.
 
-The pytest modules under `tests/oracle` and `tests/simulation` invoke these
-runners when `RNASEQ_P0_R_LIBRARY` points at the restored locked library. If the
-variable is absent, ordinary developer test runs skip the expensive locked
+The pytest modules under `tests/oracle` and `tests/simulation` invoke passing
+live gates when `RNASEQ_P0_R_LIBRARY` points at the restored locked library. If
+the variable is absent, ordinary developer test runs skip the expensive locked
 gates. Certification CI must set `RNASEQ_P0_REQUIRE_BENCHMARKS=1` as well as
-the library variable; in that mode a missing runtime is a test failure and the
-gate cannot silently skip. When `RNASEQ_P0_BENCHMARK_REPORT_DIR` is set, each
-live test writes its deterministic report filename into that non-symlink
-directory so CI can archive reports even when a gate fails. The locked GitHub
-Actions job makes all four gates non-skippable and uploads
+the library variable; in that mode a missing runtime is a test failure and a
+declared live gate cannot silently skip. The DESeq2 compcodeR module verifies
+the archived exploratory failure disclosure but deliberately does not run the
+untouched held-out grid. When `RNASEQ_P0_BENCHMARK_REPORT_DIR` is set, each live
+test writes its deterministic report filename into that non-symlink directory
+so CI can archive reports even when a gate fails. The locked GitHub Actions job
+makes every released live gate non-skippable and uploads
 `benchmark-results/*.json` as the `p0-benchmark-reports` artifact for 90 days,
 including on failed jobs.

@@ -1,10 +1,12 @@
 # RNA-seq Downstream Toolkit
 
 > **Status: research preview.** The repository provides one evidence-gated
-> edgeR differential-expression path and an implemented DESeq2 path whose
-> independent certification gates are still pending. It does not make an
-> individual analysis publication-ready; upstream provenance and statistical
-> review are still required.
+> edgeR differential-expression path and an implemented DESeq2 path. DESeq2
+> passes its independent airway parity oracle, but its disclosed compcodeR
+> exploration failed the predeclared FDR calibration limits, so that path is
+> not evidence-gated. The toolkit does not make an individual analysis
+> publication-ready; upstream provenance and statistical review are still
+> required.
 
 An auditable, non-interactive toolkit that validates declared bulk RNA-seq
 inputs, runs an explicitly selected locked statistical backend, and publishes
@@ -28,8 +30,8 @@ machine-verifiable results through a JSON-only command-line interface.
   `|logFC|` filtering.
 - A separate DESeq2 1.52 implementation with Wald tests, formal
   `greaterAbs` LFC-threshold tests, full-versus-reduced LRTs, and optional
-  coefficient-only apeglm shrinkage. Its D2 oracle and simulation gates are
-  not yet complete.
+  coefficient-only apeglm shrinkage. Wald and LRT match an independent airway
+  oracle exactly; its simulation calibration remains unresolved.
 - Explicit `filtered` and `tested` statuses in successful result bundles;
   design, contrast, and backend failures publish no partial bundle.
 - Stable JSON responses and error codes suitable for shell automation and
@@ -172,11 +174,16 @@ validate every possible study design. A combined featureCounts manifest is
 self-attested: the toolkit verifies and binds its declared bytes, but cannot
 prove who produced them.
 
-The DESeq2 D1 implementation is intentionally listed as gate-pending rather
-than evidence-gated until its independent airway and compcodeR D2 reports are
-complete. Interactions, splines, random effects, repeated-measure models,
-GSEA/fgsea, DTU, network analysis, activity inference, and other differential-
-expression backends remain outside the evidence-gated path. The retained
+The DESeq2 implementation is intentionally listed as gate-pending rather than
+evidence-gated. Its public-chain airway Wald/LRT oracle passes, including
+omnibus LRT P values and FDR, but a predeclared 20-replicate compcodeR
+exploration observed mean FDP 0.1182 at nominal BH FDR 0.05 and exceeded the
+0.065 candidate limit. Direct DESeq2 reproduced the result, the held-out grid
+was not run, and the limits were not relaxed. The machine report and audit are
+under [`tests/simulation/`](tests/simulation/). Interactions, splines, random
+effects, repeated-measure models, GSEA/fgsea, DTU, network analysis, activity
+inference, and other differential-expression backends remain outside the
+evidence-gated path. The retained
 PyDESeq2/GSEAPy/Snakemake workflow is
 [experimental](legacy/README.md) and is not part of the evidence-gated path.
 
