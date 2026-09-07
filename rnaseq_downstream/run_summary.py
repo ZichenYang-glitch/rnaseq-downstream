@@ -2168,9 +2168,10 @@ def _verify_deseq2_route(
             )
         ):
             raise _integrity("The DESeq2 inferential-replicate import flag is invalid.")
-        if semantics == "salmon_quant_dirs_full_length" and count == 1:
+        if count == 1:
             raise _integrity(
-                "Full-length Salmon input must have zero or at least two inferential replicates per sample."
+                "Salmon input must have zero or at least two inferential "
+                "replicates per sample."
             )
         expected_unused = (
             "DESeq2 1.52.0 does not consume tximport infReps in this backend; "

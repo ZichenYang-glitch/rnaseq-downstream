@@ -980,13 +980,13 @@ read_per_sample_featurecounts <- function(input) {
 read_salmon <- function(input) {
     samples <- as_character_vector(input$sample_order, "input.sample_order")
     evidence <- validate_inferential_replicate_summary(input, samples)
-    if (identical(input$input_semantics, "salmon_quant_dirs_full_length") &&
-        evidence$count == 1) {
+    if (evidence$count == 1) {
         backend_abort(
             "BACKEND_FAILED",
-            "Full-length Salmon input with one inferential replicate is unsupported.",
+            "Salmon input with one inferential replicate is unsupported.",
             list(
                 reason = "inferential_replicate_count_below_minimum",
+                input_semantics = input$input_semantics,
                 observed_replicates_per_sample = 1,
                 minimum_replicates_per_sample = 2
             )

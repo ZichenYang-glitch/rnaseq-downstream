@@ -50,10 +50,11 @@ machine-verifiable results through a JSON-only command-line interface.
 | `salmon_quant_dirs_full_length` | `DGEListFromTximport`, including the length offset | `DESeqDataSetFromTximport`, including `avgTxLength` normalization |
 | `salmon_quant_dirs_three_prime` | Raw tximport counts without length correction | Explicit R `round()` followed by `DESeqDataSetFromMatrix`, without a length offset |
 
-Full-length Salmon inputs retain inferential replicates when available. Zero
-replicates use the ordinary route and exactly one replicate is rejected. edgeR
-uses two or more replicates for its supported uncertainty route; DESeq2 imports
-and verifies them but records that they are not used for inference.
+Both Salmon routes retain inferential replicates when available. Zero
+replicates use the ordinary route, exactly one replicate per sample is rejected,
+and two or more consistent replicates are admitted. edgeR uses them only for
+its supported full-length uncertainty route; DESeq2 imports and verifies them
+but records that they are not used for inference.
 
 Bare merged Salmon gene-count matrices are rejected because they cannot show
 whether a transcript-length offset is required. Request templates are under

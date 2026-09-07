@@ -131,6 +131,37 @@ def _rounding_audit(*, mode: str = "none_integer_input") -> dict[str, object]:
     }
 
 
+def _three_prime_route(
+    *,
+    replicate_count: int = 0,
+    rounding_audit: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "constructor": "DESeq2::DESeqDataSetFromMatrix",
+        "count_source": "txi$counts",
+        "count_semantics": "salmon_estimated_counts_rounded_for_DESeq2",
+        "transcript_length_offset": False,
+        "gene_length_correction": False,
+        "countsFromAbundance": "no",
+        "dropInfReps": False,
+        "inferential_replicates_imported": replicate_count > 0,
+        "inferential_replicate_state": "all" if replicate_count > 0 else "none",
+        "inferential_replicates_per_sample": replicate_count,
+        "inferential_replicate_method": "Gibbs" if replicate_count > 0 else None,
+        "inferential_replicates_used_for_inference": False,
+        "inferential_replicates_unused_reason": (
+            "DESeq2 1.52.0 does not consume tximport infReps in this backend; "
+            "they are imported only to verify declared evidence."
+        ),
+        "rounding_disclosure": (
+            "The toolkit explicitly calls base::round before "
+            "DESeqDataSetFromMatrix; no length offset is attached."
+        ),
+        "rounding_audit": rounding_audit
+        or _rounding_audit(mode="explicit_before_matrix_constructor"),
+    }
+
+
 def _refresh_manifest(run_dir: Path) -> None:
     manifest = {
         "schema_version": "1.0",
@@ -725,34 +756,29 @@ def test_deseq2_rejects_three_prime_rounding_delta_over_half(tmp_path: Path) -> 
     audit = _rounding_audit(mode="explicit_before_matrix_constructor")
     audit["max_absolute_delta"] = 0.6
     audit["per_sample"][0]["max_absolute_delta"] = 0.6
-    analysis["route_observed"] = {
-        "constructor": "DESeq2::DESeqDataSetFromMatrix",
-        "count_source": "txi$counts",
-        "count_semantics": "salmon_estimated_counts_rounded_for_DESeq2",
-        "transcript_length_offset": False,
-        "gene_length_correction": False,
-        "countsFromAbundance": "no",
-        "dropInfReps": False,
-        "inferential_replicates_imported": False,
-        "inferential_replicate_state": "none",
-        "inferential_replicates_per_sample": 0,
-        "inferential_replicate_method": None,
-        "inferential_replicates_used_for_inference": False,
-        "inferential_replicates_unused_reason": (
-            "DESeq2 1.52.0 does not consume tximport infReps in this backend; "
-            "they are imported only to verify declared evidence."
-        ),
-        "rounding_disclosure": (
-            "The toolkit explicitly calls base::round before "
-            "DESeqDataSetFromMatrix; no length offset is attached."
-        ),
-        "rounding_audit": audit,
-    }
+    analysis["route_observed"] = _three_prime_route(rounding_audit=audit)
     analysis["pipeline"][0]["constructor"] = "DESeq2::DESeqDataSetFromMatrix"
     _write_json(path, analysis)
     _refresh_manifest(run_dir)
 
     with pytest.raises(InputIntegrityError, match="exceeds one half"):
+        summarize_run(run_dir)
+
+
+@pytest.mark.unit
+def test_deseq2_rejects_three_prime_single_inferential_replicate(
+    tmp_path: Path,
+) -> None:
+    run_dir = _bundle(tmp_path)
+    path = run_dir / "analysis.json"
+    analysis = json.loads(path.read_text(encoding="utf-8"))
+    analysis["input_semantics"] = "salmon_quant_dirs_three_prime"
+    analysis["route_observed"] = _three_prime_route(replicate_count=1)
+    analysis["pipeline"][0]["constructor"] = "DESeq2::DESeqDataSetFromMatrix"
+    _write_json(path, analysis)
+    _refresh_manifest(run_dir)
+
+    with pytest.raises(InputIntegrityError, match="zero or at least two"):
         summarize_run(run_dir)
 
 

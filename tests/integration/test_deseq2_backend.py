@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import math
@@ -11,8 +12,13 @@ import shutil
 
 import pytest
 
+from rnaseq_downstream import deseq2_backend
 from rnaseq_downstream.deseq2_backend import run_deseq2
-from rnaseq_downstream.errors import CountValuesInvalidError, DesignRankDeficientError
+from rnaseq_downstream.errors import (
+    BackendFailedError,
+    CountValuesInvalidError,
+    DesignRankDeficientError,
+)
 from rnaseq_downstream.run_summary import summarize_run
 from rnaseq_downstream.validation_bundle import validate_request_to_bundle
 from tests.integration.test_edger_backend import (
@@ -401,6 +407,7 @@ def test_locked_deseq2_design_lint_fails_closed(
         (False, 0, "deseq2_constructor"),
         (False, 2, "deseq2_constructor"),
         (True, 0, "explicit_before_matrix_constructor"),
+        (True, 2, "explicit_before_matrix_constructor"),
     ],
 )
 def test_locked_salmon_routes_disclose_rounding_and_unused_infreps(
@@ -466,8 +473,81 @@ def test_locked_salmon_routes_disclose_rounding_and_unused_infreps(
         assert math.isclose(item["total_count_delta"], expected_delta, abs_tol=1e-12)
     assert route["inferential_replicates_used_for_inference"] is False
     assert route["inferential_replicates_imported"] is (inferential_replicates > 0)
+    assert route["inferential_replicate_state"] == (
+        "all" if inferential_replicates else "none"
+    )
+    assert route["inferential_replicates_per_sample"] == inferential_replicates
+    assert route["inferential_replicate_method"] == (
+        "bootstrap" if inferential_replicates else None
+    )
+    assert (
+        "does not consume tximport infReps"
+        in route["inferential_replicates_unused_reason"]
+    )
     assert route["transcript_length_offset"] is (not three_prime)
+    assert route["gene_length_correction"] is (not three_prime)
+    assert route["countsFromAbundance"] == "no"
+    assert route["dropInfReps"] is False
+    if three_prime:
+        assert route["constructor"] == "DESeq2::DESeqDataSetFromMatrix"
+        assert route["count_source"] == "txi$counts"
+        assert audit["source_matrix_sha256"] != audit["rounded_matrix_sha256"]
+    else:
+        assert route["constructor"] == "DESeq2::DESeqDataSetFromTximport"
     assert summarize_run(output)["status"] == "verified_complete"
+
+
+def test_locked_r_backend_independently_rejects_one_three_prime_replicate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rscript, r_library = _locked_runtime()
+    root = tmp_path / "three-prime-single-replicate-defense"
+    input_request = _salmon_request(
+        root,
+        three_prime=True,
+        inferential_replicates=2,
+    )
+    bundle = root / "validated"
+    validate_request_to_bundle(input_request, bundle)
+    output = root / "must-not-exist"
+    original_write = deseq2_backend._write_private_json
+
+    def write_with_single_replicate(
+        path: Path,
+        document: dict[str, object],
+    ) -> None:
+        altered = copy.deepcopy(document)
+        salmon = altered["input"]["salmon"]  # type: ignore[index]
+        summary = salmon["inferential_replicates"]  # type: ignore[index]
+        summary["replicate_count"] = 1
+        for record in summary["per_sample"]:
+            record["count"] = 1
+        original_write(path, altered)
+
+    monkeypatch.setattr(
+        deseq2_backend,
+        "_write_private_json",
+        write_with_single_replicate,
+    )
+
+    with pytest.raises(BackendFailedError) as caught:
+        run_deseq2(
+            _request(root, bundle),
+            output,
+            rscript=rscript,
+            r_library=r_library,
+        )
+
+    assert caught.value.details["reason"] == (
+        "inferential_replicate_count_below_minimum"
+    )
+    assert caught.value.details["input_semantics"] == ("salmon_quant_dirs_three_prime")
+    assert caught.value.details["observed_replicates_per_sample"] == 1
+    assert caught.value.details["minimum_replicates_per_sample"] == 2
+    assert caught.value.details["backend_returncode"] == 4
+    assert not output.exists()
+    assert not list(root.glob(f".{output.name}.deseq2-*"))
 
 
 def test_locked_deseq2_rejects_counts_above_r_integer_max(

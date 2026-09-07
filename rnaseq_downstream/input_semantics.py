@@ -1989,7 +1989,7 @@ def _summarize_replicates(
 
     replicate_count = next(iter(counts)) if len(counts) == 1 else None
     if (
-        input_semantics == SALMON_FULL_LENGTH
+        input_semantics in {SALMON_FULL_LENGTH, SALMON_THREE_PRIME}
         and state == "all"
         and consistent
         and replicate_count == 1
@@ -2003,8 +2003,8 @@ def _summarize_replicates(
         }
         if validation_level == "validate":
             raise InputValidationError(
-                "Full-length Salmon inferential overdispersion requires at least "
-                "two replicates per sample.",
+                "Salmon inferential-replicate evidence requires either zero or "
+                "at least two replicates per sample.",
                 details=details,
             )
         warnings.append(
@@ -2012,8 +2012,8 @@ def _summarize_replicates(
                 "code": "INFERENTIAL_REPLICATES_INSUFFICIENT",
                 "severity": "high",
                 "message": (
-                    "A single inferential replicate per sample cannot estimate "
-                    "the full-length Salmon overdispersion adjustment."
+                    "A single inferential replicate per sample is unsupported "
+                    "for either certified Salmon route."
                 ),
                 "details": details,
             }

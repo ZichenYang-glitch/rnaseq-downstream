@@ -86,10 +86,10 @@ reported as a high-risk warning and makes the input ineligible.
   downstream IEEE-754 range, and their documented domain;
 - fails when inferential replicates are mixed across samples or their method and
   replicate count are inconsistent; and
-- fails a full-length request when exactly one inferential replicate is declared
-  per sample, because at least two are required to estimate inferential
-  overdispersion. The three-prime route does not use that adjustment and is not
-  subject to this minimum.
+- fails either Salmon route when exactly one inferential replicate is declared
+  per sample. One replicate cannot support uncertainty estimation and is kept
+  unsupported even when a downstream route records rather than consumes the
+  replicate evidence.
 
 Neither operation validates a design matrix or invokes edgeR.
 
@@ -358,6 +358,11 @@ full-length route. Its normalized route is deliberately different:
 - `countsFromAbundance = "no"`;
 - no transcript-length offset;
 - no gene-length correction.
+
+As in the full-length route, zero inferential replicates or at least two
+consistent replicates per sample are admitted; exactly one is rejected by the
+shared input gate. Three-prime analysis records admitted replicate evidence but
+does not use it for length correction or inferential-overdispersion adjustment.
 
 A high-risk override can be declared only with an explicit reason:
 

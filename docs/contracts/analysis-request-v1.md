@@ -420,12 +420,10 @@ Salmon matrix and therefore cannot independently reconstruct those digests.
 Their trust chain is the validated input evidence plus the digest-coupled
 private copies consumed by the R backend.
 
-For full-length Salmon, inferential-replicate admission follows the edgeR rule:
-zero replicates is accepted, exactly one per sample is rejected, and two or
-more consistent replicates are recorded. The three-prime route also records
-any validated imported replicate evidence. DESeq2 consumes no inferential-
-replicate uncertainty in either route, so provenance says `unused` rather than
-claiming that uncertainty was propagated.
+For both Salmon semantics, zero inferential replicates is accepted, exactly one
+per sample is rejected, and two or more consistent replicates are recorded.
+DESeq2 consumes no inferential-replicate uncertainty in either route, so
+provenance says `unused` rather than claiming that uncertainty was propagated.
 
 Relative `validated_input_bundle` paths are resolved from the analysis request,
 not from the process working directory. `run` verifies the bundle manifest,
@@ -511,7 +509,8 @@ The three accepted input semantics keep their checkpoint-A meanings:
   analysis.
 - `salmon_quant_dirs_three_prime` requires the explicit three-prime declaration
   and uses raw `txi$counts` in `DGEList`, without a gene-length correction or
-  offset.
+  offset. The shared input gate rejects exactly one inferential replicate per
+  sample before either backend is dispatched.
 
 ## Published core result bundle
 
