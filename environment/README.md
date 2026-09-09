@@ -48,6 +48,10 @@ every source-manifest archive, checks it with GNU `sha256sum` 9.5 from the
 locked Conda environment, restores the transitive closure, and then installs
 primary packages in this order:
 `limma`, `edgeR`, `tximport`, `DESeq2`, `apeglm`, `compcodeR`, `airway`.
+A source download that fails transiently (for example, a gateway timeout) is
+retried with backoff, at most three attempts per archive. Every attempt is
+accepted only after its SHA-256 check passes, and exhausting the retries
+aborts the bootstrap.
 
 The bootstrap isolates the renv cache and availability metadata under a
 lock-fingerprinted state directory next to the target library. This prevents a

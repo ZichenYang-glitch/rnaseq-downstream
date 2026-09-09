@@ -328,6 +328,18 @@ def test_bootstrap_is_noninteractive_checksum_gated_and_ordered() -> None:
 
 
 @pytest.mark.unit
+def test_bootstrap_source_downloads_retry_then_fail_closed() -> None:
+    text = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+
+    assert "DOWNLOAD_MAX_ATTEMPTS <- 3L" in text
+    assert "DOWNLOAD_BACKOFF_SECONDS <- c(5L, 20L)" in text
+    assert "download_verified_source(record, archive, sha256sum)" in text
+    assert "Sys.sleep(wait_seconds)" in text
+    assert "verify_archive(archive, record$sha256, sha256sum)" in text
+    assert "after %d attempts" in text
+
+
+@pytest.mark.unit
 def test_verifier_has_primary_pins_and_machine_readable_contract() -> None:
     text = VERIFY_SCRIPT.read_text(encoding="utf-8")
 

@@ -27,6 +27,8 @@ EXPECTED_SOURCE_VERSIONS <- c(
   compcodeR = "1.48.0",
   airway = "1.32.0"
 )
+DOWNLOAD_MAX_ATTEMPTS <- 3L
+DOWNLOAD_BACKOFF_SECONDS <- c(5L, 20L)
 
 fail <- function(message) {
   stop(message, call. = FALSE)
@@ -334,6 +336,54 @@ isolate_renv_state <- function(target, lockfile, manifest_path, sha256sum) {
   message(sprintf("Using lock-specific renv state: %s", state_root))
 }
 
+# A transient gateway or truncation failure must not abort a locked restore on
+# the first attempt.  Every attempt is still gated by the SHA-256 check, and
+# exhausting the retries remains fail-closed.
+download_verified_source <- function(record, archive, sha256sum) {
+  last_error <- "download not attempted"
+  for (attempt in seq_len(DOWNLOAD_MAX_ATTEMPTS)) {
+    if (attempt > 1L) {
+      wait_seconds <- DOWNLOAD_BACKOFF_SECONDS[[attempt - 1L]]
+      message(sprintf(
+        "Retrying download for %s %s in %d seconds (attempt %d of %d).",
+        record$package,
+        record$version,
+        wait_seconds,
+        attempt,
+        DOWNLOAD_MAX_ATTEMPTS
+      ))
+      Sys.sleep(wait_seconds)
+    }
+    attempt_error <- tryCatch(
+      {
+        download.file(record$url, archive, mode = "wb", quiet = FALSE)
+        verify_archive(archive, record$sha256, sha256sum)
+        NULL
+      },
+      error = function(condition) conditionMessage(condition)
+    )
+    if (is.null(attempt_error)) {
+      return(invisible(TRUE))
+    }
+    last_error <- attempt_error
+    message(sprintf(
+      "Download attempt %d of %d failed for %s %s: %s",
+      attempt,
+      DOWNLOAD_MAX_ATTEMPTS,
+      record$package,
+      record$version,
+      attempt_error
+    ))
+  }
+  fail(sprintf(
+    "Download failed for %s %s after %d attempts: %s",
+    record$package,
+    record$version,
+    DOWNLOAD_MAX_ATTEMPTS,
+    last_error
+  ))
+}
+
 download_sources <- function(manifest, destination, sha256sum) {
   dir.create(destination, recursive = TRUE, showWarnings = FALSE)
   paths <- setNames(character(nrow(manifest)), manifest$package)
@@ -346,16 +396,7 @@ download_sources <- function(manifest, destination, sha256sum) {
       record$package,
       record$version
     ))
-    tryCatch(
-      download.file(record$url, archive, mode = "wb", quiet = FALSE),
-      error = function(condition) fail(sprintf(
-        "Download failed for %s %s: %s",
-        record$package,
-        record$version,
-        conditionMessage(condition)
-      ))
-    )
-    verify_archive(archive, record$sha256, sha256sum)
+    download_verified_source(record, archive, sha256sum)
     paths[[record$package]] <- archive
   }
 
