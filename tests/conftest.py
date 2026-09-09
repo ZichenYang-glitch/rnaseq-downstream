@@ -60,7 +60,11 @@ def run_module_cli():
     happens to be their current working directory.
     """
 
-    def _run(*arguments: str, cwd: Path | None = None) -> CliResult:
+    def _run(
+        *arguments: str,
+        cwd: Path | None = None,
+        timeout_seconds: int = CLI_TIMEOUT_SECONDS,
+    ) -> CliResult:
         env = os.environ.copy()
         env.pop("PYTHONPATH", None)
         completed = subprocess.run(
@@ -71,7 +75,7 @@ def run_module_cli():
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            timeout=CLI_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
         )
         return CliResult(completed)
 

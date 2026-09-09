@@ -507,6 +507,8 @@ def test_locked_cli_chain_validate_run_and_summarize(
         }
     _write_json(analysis_request, request)
     run_dir = tmp_path / "results"
+    # The run spawns the locked R backend; cold CI startup exceeds the 10s
+    # fast-fail budget that pure-Python CLI calls keep.
     run_result = run_module_cli(
         "run",
         "--request",
@@ -518,6 +520,7 @@ def test_locked_cli_chain_validate_run_and_summarize(
         "--r-library",
         r_library,
         cwd=tmp_path,
+        timeout_seconds=120,
     )
     assert run_result.returncode == 0, (run_result.stdout, run_result.stderr)
     run_document = run_result.json()

@@ -628,6 +628,8 @@ def test_locked_public_cli_executes_and_verifies_deseq2(
 
     request = _request(root, bundle)
     output = root / "results"
+    # The run spawns the locked R backend; cold CI startup exceeds the 10s
+    # fast-fail budget that pure-Python CLI calls keep.
     completed = run_module_cli(
         "run",
         "--request",
@@ -639,6 +641,7 @@ def test_locked_public_cli_executes_and_verifies_deseq2(
         "--r-library",
         r_library,
         cwd=root,
+        timeout_seconds=120,
     )
     assert completed.returncode == 0, (completed.stdout, completed.stderr)
     response = completed.json()
