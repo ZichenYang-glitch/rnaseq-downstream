@@ -33,6 +33,7 @@ jobs:
           activate-environment: ""
           auto-activate: true
           miniforge-version: latest
+          conda-remove-defaults: 'true'
 
       - name: Install the reviewed conda-lock frontend
         shell: bash -el {0}
