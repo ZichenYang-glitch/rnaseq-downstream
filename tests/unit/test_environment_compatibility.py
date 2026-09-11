@@ -312,3 +312,31 @@ def test_ci_rebuilds_and_archives_live_compatibility_evidence() -> None:
     assert "p1-environment-compatibility-report.json" in workflow
     assert "path: benchmark-results/*.json" in workflow
     assert "cmp --silent" not in workflow
+
+
+@pytest.mark.unit
+def test_ci_records_cpu_and_blas_without_changing_thread_policy() -> None:
+    workflow = CERTIFICATION_WORKFLOW.read_text(encoding="utf-8")
+
+    assert workflow.count("name: Record runner CPU identity") == 2
+    assert "report_blas_runtime.py --prefix" in workflow
+    assert 'OPENBLAS_VERBOSE: "2"' in workflow
+    assert "OPENBLAS_NUM_THREADS" not in workflow
+    assert "OMP_NUM_THREADS" not in workflow
+    assert "check_benchmark_artifacts.py" in workflow
+    assert "--baseline tests/oracle/deseq2-airway-benchmark-report.json" in workflow
+
+
+@pytest.mark.unit
+def test_blas_diagnostic_is_explicit_and_does_not_cancel_other_samples() -> None:
+    workflow = CERTIFICATION_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "blas_diagnostic:" in workflow
+    assert "if: ${{ !inputs.blas_diagnostic }}" in workflow
+    assert (
+        "if: ${{ github.event_name == 'workflow_dispatch' && inputs.blas_diagnostic }}"
+        in workflow
+    )
+    assert "inputs.blas_diagnostic && github.run_id" in workflow
+    assert "sample: [1, 2, 3]" in workflow
+    assert "run_blas_diagnostic.py" in workflow

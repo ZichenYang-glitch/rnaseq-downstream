@@ -97,6 +97,36 @@ all Conda and R transitive records. Exact closure installation is enforced by
 `conda-lock install` and the strict, clean `renv::restore`; reinstall from both
 locks to reassert full closure parity after an environment has been modified.
 
+## BLAS runtime diagnostics
+
+The lock contains `libblas 3.11.0` (`10_h4a7cf45_openblas`) and
+`libopenblas 0.3.34` (`pthreads_hcf972fe_1`). The latter is a `DYNAMIC_ARCH`
+build: its selected kernel can change with the runner CPU even when all package
+hashes are identical. This R build links `libR.so` directly to `libblas.so.3`,
+which resolves to `libopenblasp-r0.3.34.so`; there is no separate `libRblas.so`.
+
+Certification logs the CPU model, AVX2/AVX-512/FMA flags, loaded BLAS identity,
+and unchanged thread settings to the CI log and step summary. These diagnostic
+fields are not added to benchmark reports. A manual diagnostic dispatch samples
+three runners independently, restores the same locks, prints the automatically
+selected core with `OPENBLAS_VERBOSE=2`, and tests eligible explicit cores:
+
+```bash
+gh workflow run p0-certification.yml --ref BRANCH -f blas_diagnostic=true
+```
+
+This dispatch-only job runs the airway live oracle and separately compares its
+complete numeric-artifact SHA-256/size inventory with the frozen report. A
+within-run oracle pass is not a frozen-byte pass. Unsupported ISA candidates
+are skipped before loading BLAS; forcing a core bypasses OpenBLAS's automatic
+CPU checks and must never be used as an ISA compatibility test. Diagnostic
+reports are archived separately, without modifying the frozen reports.
+
+A permanent core pin requires both frozen-byte reproduction and a supported
+ISA across the runner pool. If no such core can be demonstrated, stop: neither
+a tolerance-based compatibility check nor a replacement baseline is permitted.
+Do not change `OPENBLAS_NUM_THREADS` while investigating kernel selection.
+
 ## Regenerate the R lock
 
 Author an R-package change only in a fresh library under the locked Conda

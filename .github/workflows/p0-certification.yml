@@ -5,17 +5,23 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      blas_diagnostic:
+        description: Sample BLAS kernels on three runners without running certification
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: p0-certification-${{ github.ref }}
+  group: p0-certification-${{ github.ref }}-${{ inputs.blas_diagnostic && github.run_id || 'certification' }}
   cancel-in-progress: true
 
 jobs:
   locked-oracle-and-simulation:
     name: Locked evidence gates and calibration diagnostics
+    if: ${{ !inputs.blas_diagnostic }}
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
@@ -26,6 +32,9 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
+
+      - name: Record runner CPU identity
+        run: python3 scripts/ci/report_blas_runtime.py
 
       - name: Install the Conda bootstrap tool
         uses: conda-incubator/setup-miniconda@v4
@@ -48,6 +57,14 @@ jobs:
         run: >-
           conda run --prefix "$P0_PREFIX"
           python -m pip install --no-deps --no-build-isolation -e .
+
+      - name: Record the locked BLAS runtime
+        shell: bash -el {0}
+        env:
+          OPENBLAS_VERBOSE: "2"
+        run: >-
+          conda run --prefix "$P0_PREFIX" --no-capture-output
+          python scripts/ci/report_blas_runtime.py --prefix "$P0_PREFIX"
 
       - name: Restore the exact R and Bioconductor library from source locks
         shell: bash -el {0}
@@ -93,6 +110,14 @@ jobs:
             --reports "$RNASEQ_P0_BENCHMARK_REPORT_DIR" \
             --output "$RNASEQ_P0_BENCHMARK_REPORT_DIR/p1-environment-compatibility-report.json"
 
+      - name: Verify frozen DESeq2 oracle numeric artifacts
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX" --no-capture-output
+          python scripts/ci/check_benchmark_artifacts.py
+          --baseline tests/oracle/deseq2-airway-benchmark-report.json
+          --current "$RNASEQ_P0_BENCHMARK_REPORT_DIR/deseq2-airway-benchmark-report.json"
+
       - name: Archive machine-readable benchmark reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -101,4 +126,82 @@ jobs:
           name: p0-benchmark-reports
           path: benchmark-results/*.json
           if-no-files-found: error
+          retention-days: 90
+
+  blas-kernel-diagnostic:
+    name: BLAS kernel diagnostic (sample ${{ matrix.sample }})
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.blas_diagnostic }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [1, 2, 3]
+    env:
+      P0_PREFIX: ${{ github.workspace }}/.ci/rnaseq-downstream-p0
+      RNASEQ_P0_R_LIBRARY: ${{ github.workspace }}/.ci/rnaseq-downstream-p0-r-library
+      OPENBLAS_VERBOSE: "2"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Record runner CPU identity
+        run: python3 scripts/ci/report_blas_runtime.py
+
+      - name: Install the Conda bootstrap tool
+        uses: conda-incubator/setup-miniconda@v4
+        with:
+          activate-environment: ""
+          auto-activate: true
+          miniforge-version: latest
+          conda-remove-defaults: 'true'
+
+      - name: Install the reviewed conda-lock frontend
+        shell: bash -el {0}
+        run: python -m pip install --disable-pip-version-check conda-lock==4.0.1
+
+      - name: Restore the exact locked Conda prefix
+        shell: bash -el {0}
+        run: conda-lock install --prefix "$P0_PREFIX" conda-lock.yml
+
+      - name: Install the toolkit without resolving new dependencies
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX"
+          python -m pip install --no-deps --no-build-isolation -e .
+
+      - name: Record the automatic locked BLAS runtime
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX" --no-capture-output
+          python scripts/ci/report_blas_runtime.py --prefix "$P0_PREFIX"
+
+      - name: Restore the exact R and Bioconductor library from source locks
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX"
+          Rscript --vanilla environment/bootstrap.R
+          --library "$RNASEQ_P0_R_LIBRARY"
+
+      - name: Verify the locked runtime identity
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX"
+          Rscript --vanilla environment/verify.R
+          --library "$RNASEQ_P0_R_LIBRARY"
+
+      - name: Sample ISA-compatible kernels against frozen airway bytes
+        shell: bash -el {0}
+        run: >-
+          conda run --prefix "$P0_PREFIX" --no-capture-output
+          python scripts/ci/run_blas_diagnostic.py --prefix "$P0_PREFIX"
+          --output "${{ github.workspace }}/blas-diagnostic-results"
+
+      - name: Archive diagnostic benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: blas-diagnostic-sample-${{ matrix.sample }}
+          path: blas-diagnostic-results/**/*.json
+          if-no-files-found: warn
           retention-days: 90
