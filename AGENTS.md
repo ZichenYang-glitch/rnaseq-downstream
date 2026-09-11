@@ -250,6 +250,9 @@ re-runs all released live evidence gates with a compatibility report asserting
 byte-identical historical numeric artifacts. CI re-runs those live gates from
 scratch on each push. The failed DESeq2 calibration study remains archive-only;
 CI blocks on its disclosure and integrity checks, not on a rerun or relaxed gate.
+Frozen-byte replay requires a reviewed, ISA-safe `OPENBLAS_CORETYPE` pin; no
+cross-runner pin is currently approved (see `environment/README.md`), so stop
+on a mismatch rather than forcing an unsupported core or replacing evidence.
 
 ## What is NOT available
 

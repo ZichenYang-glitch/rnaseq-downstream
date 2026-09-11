@@ -215,6 +215,9 @@ Bioconductor 3.23 包,源码归档以 SHA-256 钉死)。环境演进遵循
 每次变更重跑全部已发布 live evidence gate 并出兼容性报告,断言历史数值
 产物逐字节不变。CI 在每次 push 时从零重跑这些 live gate。未通过的 DESeq2
 校准研究仅作归档;CI 阻塞式检查其披露与完整性,但不重跑或放宽该闸门。
+复现冻结字节需要经过审查且 ISA 安全的 `OPENBLAS_CORETYPE` 固定值;目前尚无
+获批的跨 runner 固定值(见 `environment/README.md`),因此遇到不匹配时应停止,
+不得强制使用不支持的内核或替换证据。
 
 ## 目前不提供的功能
 

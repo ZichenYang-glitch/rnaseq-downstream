@@ -130,6 +130,25 @@ Keep `OPENBLAS_VERBOSE=2` confined to the standalone diagnostic probes, not
 bootstrap, verification, or live gates: extra BLAS messages would contaminate
 the verifier's exact NumPy-version output check. The verifier is not relaxed.
 
+No cross-runner `OPENBLAS_CORETYPE` pin is currently approved. In the local
+locked-environment sample, explicit `SkylakeX` and `Cooperlake` reproduce all five
+frozen airway artifact digests and sizes, while `Prescott`, `Barcelona`, `Core2`,
+`Nehalem`, `Sandybridge`, `Haswell`, and `Zen` do not. All ten local runs, including
+automatic selection, pass the unchanged within-run oracle. The matching cores
+require AVX-512, which is not exposed by every sampled hosted runner. Forcing
+either core on an unsupported machine is not a valid remedy: the upstream
+[forced-core dispatch](https://github.com/OpenMathLib/OpenBLAS/blob/v0.3.34/driver/others/dynamic.c)
+bypasses automatic ISA checks, and
+[Cooperlake inherits the SkylakeX kernels](https://github.com/OpenMathLib/OpenBLAS/blob/v0.3.34/kernel/x86_64/KERNEL.COOPERLAKE).
+
+The [dispatch-only diagnostic run](https://github.com/ZichenYang-glitch/rnaseq-downstream/actions/runs/34560991836)
+records per-runner hardware and candidate outcomes in logs and step summaries,
+with unchanged-schema reports as separate artifacts. Until a safe matching
+profile is reviewed, local replay must not claim cross-runner frozen-byte
+reproducibility. Stop on a mismatch; do not force an unsupported kernel, change
+thread counts, replace frozen reports, or substitute a tolerance check. The
+fixed-kernel rollout and full cross-runner acceptance remain blocked.
+
 ## Regenerate the R lock
 
 Author an R-package change only in a fresh library under the locked Conda
