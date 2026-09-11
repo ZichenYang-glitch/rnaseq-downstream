@@ -126,6 +126,9 @@ A permanent core pin requires both frozen-byte reproduction and a supported
 ISA across the runner pool. If no such core can be demonstrated, stop: neither
 a tolerance-based compatibility check nor a replacement baseline is permitted.
 Do not change `OPENBLAS_NUM_THREADS` while investigating kernel selection.
+Keep `OPENBLAS_VERBOSE=2` confined to the standalone diagnostic probes, not
+bootstrap, verification, or live gates: extra BLAS messages would contaminate
+the verifier's exact NumPy-version output check. The verifier is not relaxed.
 
 ## Regenerate the R lock
 

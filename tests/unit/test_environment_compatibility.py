@@ -340,3 +340,14 @@ def test_blas_diagnostic_is_explicit_and_does_not_cancel_other_samples() -> None
     assert "inputs.blas_diagnostic && github.run_id" in workflow
     assert "sample: [1, 2, 3]" in workflow
     assert "run_blas_diagnostic.py" in workflow
+
+
+@pytest.mark.unit
+def test_blas_verbose_is_limited_to_probes_not_runtime_verification() -> None:
+    workflow = CERTIFICATION_WORKFLOW.read_text(encoding="utf-8")
+
+    # verify.R deliberately expects an exact NumPy version string from merged
+    # stdout/stderr. OpenBLAS verbose messages must never reach that subprocess.
+    assert '\n      OPENBLAS_VERBOSE:' not in workflow
+    assert workflow.count('\n          OPENBLAS_VERBOSE: "2"') == 2
+    assert "- name: Record the automatic locked BLAS runtime\n" in workflow

@@ -26,6 +26,7 @@ def test_cpu_flags_handles_linux_sse3_alias_and_requires_flags() -> None:
 def test_candidate_environment_preserves_all_thread_controls(tmp_path: Path) -> None:
     original = {
         "OPENBLAS_CORETYPE": "Haswell",
+        "OPENBLAS_VERBOSE": "9",
         "OPENBLAS_NUM_THREADS": "7",
         "OPENBLAS_DEFAULT_NUM_THREADS": "9",
         "OMP_NUM_THREADS": "3",
@@ -38,9 +39,11 @@ def test_candidate_environment_preserves_all_thread_controls(tmp_path: Path) -> 
     assert explicit["OPENBLAS_CORETYPE"] == "Core2"
     assert original["OPENBLAS_CORETYPE"] == "Haswell"
     for key, value in original.items():
-        if key != "OPENBLAS_CORETYPE":
+        if key not in {"OPENBLAS_CORETYPE", "OPENBLAS_VERBOSE"}:
             assert automatic[key] == explicit[key] == value
-    assert automatic["OPENBLAS_VERBOSE"] == "2"
+    assert "OPENBLAS_VERBOSE" not in automatic
+    assert "OPENBLAS_VERBOSE" not in explicit
+    assert original["OPENBLAS_VERBOSE"] == "9"
     assert automatic["RNASEQ_P0_REQUIRE_BENCHMARKS"] == "1"
     assert automatic["RNASEQ_P0_BENCHMARK_REPORT_DIR"] == str(tmp_path)
 
@@ -89,7 +92,9 @@ def test_full_grid_runs_only_airway_with_unique_report_directories(
 ) -> None:
     calls = _mock_commands(monkeypatch)
     flags = set().union(*diagnostic.CORE_REQUIREMENTS.values())
-    result = diagnostic.run_diagnostic(tmp_path, tmp_path / "results", {}, flags)
+    result = diagnostic.run_diagnostic(
+        tmp_path, tmp_path / "results", {"OPENBLAS_VERBOSE": "9"}, flags
+    )
     assert result == 0
     gates = [call for call in calls if call[1] == "gate"]
     assert [call[0] for call in gates] == list(diagnostic.CORE_REQUIREMENTS)
@@ -107,6 +112,11 @@ def test_full_grid_runs_only_airway_with_unique_report_directories(
     assert "--expect-core" not in probes[0][2]
     for core, _, command, _ in probes[1:]:
         assert command[-2:] == ["--expect-core", core]
+    for _, stage, _, environment in calls:
+        if stage in {"probe", "r_probe"}:
+            assert environment["OPENBLAS_VERBOSE"] == "2"
+        else:
+            assert "OPENBLAS_VERBOSE" not in environment
 
 
 @pytest.mark.unit

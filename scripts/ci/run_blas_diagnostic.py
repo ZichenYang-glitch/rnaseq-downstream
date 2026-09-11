@@ -63,7 +63,7 @@ def candidate_environment(
         environment.pop("OPENBLAS_CORETYPE", None)
     else:
         environment["OPENBLAS_CORETYPE"] = core
-    environment["OPENBLAS_VERBOSE"] = "2"
+    environment.pop("OPENBLAS_VERBOSE", None)
     environment["RNASEQ_P0_REQUIRE_BENCHMARKS"] = "1"
     environment["RNASEQ_P0_BENCHMARK_REPORT_DIR"] = str(report_directory)
     return environment
@@ -128,12 +128,15 @@ def run_diagnostic(
             continue
         report_directory = output / core.lower()
         candidate = candidate_environment(environment, core, report_directory)
+        probe_environment = {**candidate, "OPENBLAS_VERBOSE": "2"}
         announce(f"\n### BLAS diagnostic candidate: {core}\n", candidate)
         try:
             probe_command = [python, runtime_probe, "--prefix", str(prefix)]
             if core != "automatic":
                 probe_command.extend(["--expect-core", core])
-            if run_command(probe_command, candidate) or run_r_probe(prefix, candidate):
+            if run_command(probe_command, probe_environment) or run_r_probe(
+                prefix, probe_environment
+            ):
                 outcomes[core] = "probe_failed"
                 failed = True
                 continue

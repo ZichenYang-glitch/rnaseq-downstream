@@ -140,7 +140,6 @@ jobs:
     env:
       P0_PREFIX: ${{ github.workspace }}/.ci/rnaseq-downstream-p0
       RNASEQ_P0_R_LIBRARY: ${{ github.workspace }}/.ci/rnaseq-downstream-p0-r-library
-      OPENBLAS_VERBOSE: "2"
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -172,6 +171,8 @@ jobs:
 
       - name: Record the automatic locked BLAS runtime
         shell: bash -el {0}
+        env:
+          OPENBLAS_VERBOSE: "2"
         run: >-
           conda run --prefix "$P0_PREFIX" --no-capture-output
           python scripts/ci/report_blas_runtime.py --prefix "$P0_PREFIX"
