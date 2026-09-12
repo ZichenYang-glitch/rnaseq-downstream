@@ -348,6 +348,68 @@ def test_blas_verbose_is_limited_to_probes_not_runtime_verification() -> None:
 
     # verify.R deliberately expects an exact NumPy version string from merged
     # stdout/stderr. OpenBLAS verbose messages must never reach that subprocess.
-    assert '\n      OPENBLAS_VERBOSE:' not in workflow
+    assert "\n      OPENBLAS_VERBOSE:" not in workflow
     assert workflow.count('\n          OPENBLAS_VERBOSE: "2"') == 2
     assert "- name: Record the automatic locked BLAS runtime\n" in workflow
+
+
+def _blas_workflow_sections() -> tuple[str, str, str]:
+    workflow = CERTIFICATION_WORKFLOW.read_text(encoding="utf-8")
+    header, jobs = workflow.split("\njobs:\n", 1)
+    certification, diagnostic = jobs.split("\n  blas-kernel-diagnostic:\n", 1)
+    assert certification.startswith("  locked-oracle-and-simulation:\n")
+    return header, certification, diagnostic
+
+
+@pytest.mark.unit
+def test_only_certification_job_pins_skylakex() -> None:
+    header, certification, diagnostic = _blas_workflow_sections()
+    job_settings, steps = certification.split("\n    steps:\n", 1)
+    job_environment = job_settings.split("\n    env:\n", 1)[1]
+
+    assert "      OPENBLAS_CORETYPE: SkylakeX\n" in job_environment
+    assert certification.count("OPENBLAS_CORETYPE") == 1
+    assert "OPENBLAS_CORETYPE" not in header
+    assert "OPENBLAS_CORETYPE" not in diagnostic
+    assert "preflight_blas.py" not in diagnostic
+    assert "--expect-core" not in diagnostic
+    runtime_probe = steps.split("      - name: Record the locked BLAS runtime\n", 1)[1]
+    runtime_probe = runtime_probe.split("\n      - name:", 1)[0]
+    assert 'report_blas_runtime.py --prefix "$P0_PREFIX" --expect-core SkylakeX' in (
+        runtime_probe
+    )
+
+
+@pytest.mark.unit
+def test_skylakex_preflight_is_unconditional_and_precedes_environment_installation() -> (
+    None
+):
+    _, certification, _ = _blas_workflow_sections()
+    step = "      - name: Require SkylakeX ISA before environment installation\n"
+    preflight_position = certification.index(step)
+    preflight = certification[preflight_position:].split("\n      - name:", 1)[0]
+
+    assert preflight.strip() == (
+        "- name: Require SkylakeX ISA before environment installation\n"
+        "        run: python3 scripts/ci/preflight_blas.py"
+    )
+    for later_step in (
+        "Install the Conda bootstrap tool",
+        "Restore the exact locked Conda prefix",
+        "Record the locked BLAS runtime",
+        "Restore the exact R and Bioconductor library from source locks",
+        "Verify the locked runtime identity",
+        "Run non-skippable certification and calibration tests",
+    ):
+        assert preflight_position < certification.index(f"      - name: {later_step}\n")
+    assert "continue-on-error" not in certification
+    assert "|| true" not in certification
+
+
+@pytest.mark.unit
+def test_blas_pinning_never_sets_thread_controls() -> None:
+    from scripts.ci.report_blas_runtime import THREAD_VARIABLES
+
+    workflow = CERTIFICATION_WORKFLOW.read_text(encoding="utf-8")
+    for variable in THREAD_VARIABLES:
+        assert variable not in workflow

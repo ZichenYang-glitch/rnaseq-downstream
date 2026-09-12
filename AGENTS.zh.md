@@ -215,9 +215,11 @@ Bioconductor 3.23 包,源码归档以 SHA-256 钉死)。环境演进遵循
 每次变更重跑全部已发布 live evidence gate 并出兼容性报告,断言历史数值
 产物逐字节不变。CI 在每次 push 时从零重跑这些 live gate。未通过的 DESeq2
 校准研究仅作归档;CI 阻塞式检查其披露与完整性,但不重跑或放宽该闸门。
-复现冻结字节需要经过审查且 ISA 安全的 `OPENBLAS_CORETYPE` 固定值;目前尚无
-获批的跨 runner 固定值(见 `environment/README.md`),因此遇到不匹配时应停止,
-不得强制使用不支持的内核或替换证据。
+认证 job 固定 `OPENBLAS_CORETYPE=SkylakeX`,在安装 Conda 前执行阻塞式 ISA
+预检,恢复环境后确认实际解析内核(见 `environment/README.md`)。不兼容的 runner
+必须失败;应 rerun 获取兼容机器,不得绕过预检。诊断采样 job 仍不固定内核。
+本地非 AVX-512 机器仍可使用自动 BLAS 调度正常分析;只有逐字节复现冻结 oracle
+才需要这个固定且 ISA 兼容的配置。不得强制使用不支持的内核或替换证据。
 
 ## 目前不提供的功能
 

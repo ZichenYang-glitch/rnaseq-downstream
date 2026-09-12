@@ -9,49 +9,17 @@ from pathlib import Path
 import subprocess
 import sys
 
+if __package__:
+    from .blas_isa import CORE_REQUIREMENTS, cpu_flags
+else:
+    from blas_isa import CORE_REQUIREMENTS, cpu_flags
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CORE_REQUIREMENTS = {
-    "automatic": frozenset(),
-    "Prescott": frozenset({"sse3"}),
-    "Barcelona": frozenset({"sse3"}),
-    "Core2": frozenset({"ssse3"}),
-    "Nehalem": frozenset({"sse4_1", "sse4_2"}),
-    "Sandybridge": frozenset({"avx"}),
-    "Haswell": frozenset({"avx2", "fma"}),
-    "Zen": frozenset({"avx2", "fma"}),
-    "SkylakeX": frozenset(
-        {"avx2", "fma", "avx512f", "avx512dq", "avx512bw", "avx512vl", "avx512cd"}
-    ),
-    "Cooperlake": frozenset(
-        {
-            "avx2",
-            "fma",
-            "avx512f",
-            "avx512dq",
-            "avx512bw",
-            "avx512vl",
-            "avx512cd",
-            "avx512_bf16",
-        }
-    ),
-}
 R_PROBE = (
     'cat("R BLAS: ", extSoftVersion()[["BLAS"]], "\\n", sep=""); '
     "invisible(crossprod(matrix(seq_len(4096), nrow=64)))"
 )
-
-
-def cpu_flags(output: str) -> set[str]:
-    """Read Linux lscpu flags before any candidate can load its BLAS library."""
-    for line in output.splitlines():
-        key, separator, value = line.partition(":")
-        if separator and key.strip() == "Flags":
-            flags = set(value.split())
-            if "pni" in flags:
-                flags.add("sse3")
-            return flags
-    raise ValueError("lscpu did not provide CPU flags; explicit core probes are unsafe")
 
 
 def candidate_environment(

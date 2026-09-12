@@ -250,9 +250,13 @@ re-runs all released live evidence gates with a compatibility report asserting
 byte-identical historical numeric artifacts. CI re-runs those live gates from
 scratch on each push. The failed DESeq2 calibration study remains archive-only;
 CI blocks on its disclosure and integrity checks, not on a rerun or relaxed gate.
-Frozen-byte replay requires a reviewed, ISA-safe `OPENBLAS_CORETYPE` pin; no
-cross-runner pin is currently approved (see `environment/README.md`), so stop
-on a mismatch rather than forcing an unsupported core or replacing evidence.
+The certification job pins `OPENBLAS_CORETYPE=SkylakeX`, requires a blocking ISA
+preflight before Conda installation, and confirms the resolved core afterward
+(see `environment/README.md`). An incompatible runner must fail; rerun to obtain
+a compatible machine, never bypass preflight. The diagnostic sampling job stays
+unpinned. Normal local analysis still works on non-AVX-512 machines with automatic
+BLAS dispatch; only byte-level replay of the frozen oracle requires this pinned,
+ISA-compatible profile. Never force an unsupported core or replace evidence.
 
 ## What is NOT available
 

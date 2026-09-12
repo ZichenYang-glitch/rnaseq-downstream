@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 240
     env:
+      OPENBLAS_CORETYPE: SkylakeX
       P0_PREFIX: ${{ github.workspace }}/.ci/rnaseq-downstream-p0
       RNASEQ_P0_R_LIBRARY: ${{ github.workspace }}/.ci/rnaseq-downstream-p0-r-library
       RNASEQ_P0_BENCHMARK_REPORT_DIR: ${{ github.workspace }}/benchmark-results
@@ -35,6 +36,9 @@ jobs:
 
       - name: Record runner CPU identity
         run: python3 scripts/ci/report_blas_runtime.py
+
+      - name: Require SkylakeX ISA before environment installation
+        run: python3 scripts/ci/preflight_blas.py
 
       - name: Install the Conda bootstrap tool
         uses: conda-incubator/setup-miniconda@v4
@@ -64,7 +68,7 @@ jobs:
           OPENBLAS_VERBOSE: "2"
         run: >-
           conda run --prefix "$P0_PREFIX" --no-capture-output
-          python scripts/ci/report_blas_runtime.py --prefix "$P0_PREFIX"
+          python scripts/ci/report_blas_runtime.py --prefix "$P0_PREFIX" --expect-core SkylakeX
 
       - name: Restore the exact R and Bioconductor library from source locks
         shell: bash -el {0}

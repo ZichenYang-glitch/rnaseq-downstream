@@ -97,13 +97,53 @@ all Conda and R transitive records. Exact closure installation is enforced by
 `conda-lock install` and the strict, clean `renv::restore`; reinstall from both
 locks to reassert full closure parity after an environment has been modified.
 
-## BLAS runtime diagnostics
+## BLAS kernel policy and diagnostics
 
 The lock contains `libblas 3.11.0` (`10_h4a7cf45_openblas`) and
 `libopenblas 0.3.34` (`pthreads_hcf972fe_1`). The latter is a `DYNAMIC_ARCH`
 build: its selected kernel can change with the runner CPU even when all package
 hashes are identical. This R build links `libR.so` directly to `libblas.so.3`,
 which resolves to `libopenblasp-r0.3.34.so`; there is no separate `libRblas.so`.
+
+The `locked-oracle-and-simulation` certification job pins
+`OPENBLAS_CORETYPE=SkylakeX` at job level. Before installing the Conda bootstrap
+tool, `scripts/ci/preflight_blas.py` checks the runner's `lscpu` flags for
+`avx2`, `fma`, `avx512f`, `avx512dq`, `avx512bw`, `avx512vl`, and `avx512cd`.
+These requirements and the flag parser are shared with the diagnostic sampler
+through `scripts/ci/blas_isa.py`; there is no separate preflight copy.
+Missing or unreadable flags cause a blocking failure before environment
+installation, not a warning, skipped certification, or alternate-kernel run.
+After restoration, the runtime probe requires `--expect-core SkylakeX`, checking
+both the requested environment value and the core actually resolved by BLAS.
+
+Hosted runners are heterogeneous. If preflight reports that the runner does not
+expose the required AVX-512 ISA, rerun to obtain a compatible machine. For this
+acceptance checkpoint, stop and report after at most five total attempts without
+a compatible runner. An ISA pass is only permission to execute the locked gates;
+it is not an oracle, simulation, or compatibility pass. A later gate failure
+still requires investigation and must not be hidden by runner resampling.
+
+Normal local analysis does not require AVX-512: it uses automatic BLAS dispatch
+and retains all ordinary input, design, statistical, and bundle checks. The
+SkylakeX pin and preflight are certification-only restrictions for byte-level
+replay of the frozen oracle, not new requirements for the toolkit's analysis
+CLI. A non-AVX-512 machine can run analyses normally, but cannot reproduce the
+frozen oracle bytes with this approved profile. For local evidence replay,
+activate the locked environment and pass preflight before applying the pin:
+
+```bash
+python scripts/ci/preflight_blas.py &&
+  OPENBLAS_CORETYPE=SkylakeX \
+  RNASEQ_P0_REQUIRE_BENCHMARKS=1 \
+  RNASEQ_P0_RSCRIPT=/absolute/path/to/rnaseq-p0/bin/Rscript \
+  RNASEQ_P0_R_LIBRARY=/absolute/path/to/rnaseq-p0-r-library \
+  RNASEQ_P0_BENCHMARK_REPORT_DIR=/absolute/path/to/new-benchmark-reports \
+  python -m pytest tests -q
+```
+
+Replace the paths with the verified locked runtime and a new report directory,
+as described in the gate documentation. Keep non-skippable benchmark mode
+enabled. Do not use the pin on an incompatible machine.
 
 Certification logs the CPU model, AVX2/AVX-512/FMA flags, loaded BLAS identity,
 and unchanged thread settings to the CI log and step summary. These diagnostic
@@ -122,16 +162,17 @@ are skipped before loading BLAS; forcing a core bypasses OpenBLAS's automatic
 CPU checks and must never be used as an ISA compatibility test. Diagnostic
 reports are archived separately, without modifying the frozen reports.
 
-A permanent core pin requires both frozen-byte reproduction and a supported
-ISA across the runner pool. If no such core can be demonstrated, stop: neither
-a tolerance-based compatibility check nor a replacement baseline is permitted.
+A certification attempt requires both frozen-byte reproduction and a supported
+ISA on its runner. The approved policy rejects incompatible machines rather
+than claiming that every machine in the pool supports the pin. Neither a
+tolerance-based compatibility check nor a replacement baseline is permitted.
 Do not change `OPENBLAS_NUM_THREADS` while investigating kernel selection.
 Keep `OPENBLAS_VERBOSE=2` confined to the standalone diagnostic probes, not
 bootstrap, verification, or live gates: extra BLAS messages would contaminate
 the verifier's exact NumPy-version output check. The verifier is not relaxed.
 
-No cross-runner `OPENBLAS_CORETYPE` pin is currently approved. In the local
-locked-environment sample, explicit `SkylakeX` and `Cooperlake` reproduce all five
+The SkylakeX-only certification policy follows the reviewed diagnostic study.
+In the local locked-environment sample, `SkylakeX` and `Cooperlake` reproduce all five
 frozen airway artifact digests and sizes, while `Prescott`, `Barcelona`, `Core2`,
 `Nehalem`, `Sandybridge`, `Haswell`, and `Zen` do not. All ten local runs, including
 automatic selection, pass the unchanged within-run oracle. The matching cores
@@ -143,11 +184,12 @@ bypasses automatic ISA checks, and
 
 The [dispatch-only diagnostic run](https://github.com/ZichenYang-glitch/rnaseq-downstream/actions/runs/34560991836)
 records per-runner hardware and candidate outcomes in logs and step summaries,
-with unchanged-schema reports as separate artifacts. Until a safe matching
-profile is reviewed, local replay must not claim cross-runner frozen-byte
-reproducibility. Stop on a mismatch; do not force an unsupported kernel, change
-thread counts, replace frozen reports, or substitute a tolerance check. The
-fixed-kernel rollout and full cross-runner acceptance remain blocked.
+with unchanged-schema reports as separate artifacts. The
+`blas-kernel-diagnostic` job remains dispatch-only and has no job-level core pin;
+it continues to sample automatic dispatch and ISA-eligible explicit candidates
+across the runner pool. Do not force an unsupported kernel, change thread
+counts, replace frozen reports, or substitute a tolerance check. Frozen-byte
+claims remain limited to compatible machines whose pinned runs pass the gates.
 
 ## Regenerate the R lock
 
