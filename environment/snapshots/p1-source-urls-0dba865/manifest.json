@@ -1,0 +1,14 @@
+{
+  "schema_version": "rnaseq-downstream-environment-snapshot-v1",
+  "snapshot_id": "p1-source-urls-0dba865",
+  "source_revision": "0dba86589365fcb366c98a84c3bc812a6beab21c",
+  "immutability": "append_only",
+  "files": [
+    {
+      "source_path": "environment/r-sources.lock",
+      "snapshot_path": "environment/r-sources.lock",
+      "sha256": "cbe8cdc6dae73a629dadf6a6c2e743f0fb95c20c9b85bb9acecbe23c64bd8659",
+      "size_bytes": 1676
+    }
+  ]
+}

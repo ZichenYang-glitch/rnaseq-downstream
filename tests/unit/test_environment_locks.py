@@ -123,7 +123,7 @@ EXPECTED_SOURCE_RECORDS = {
         "version": "1.48.0",
         "repository": "Bioconductor 3.23",
         "role": "primary",
-        "url": "https://bioconductor.org/packages/3.23/bioc/src/contrib/compcodeR_1.48.0.tar.gz",
+        "url": "https://bioconductor.org/packages/3.23/bioc/src/contrib/Archive/compcodeR/compcodeR_1.48.0.tar.gz",
         "sha256": "9890c63d8f6cb585ef9311fa888d162ebe1148809c9082d8710f39a07a013b07",
     },
     "airway": {

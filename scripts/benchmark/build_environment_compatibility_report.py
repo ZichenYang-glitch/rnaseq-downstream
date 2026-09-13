@@ -161,6 +161,21 @@ def _source_manifest_records(path: Path) -> dict[str, dict[str, str]]:
     return records
 
 
+def _is_official_archive_relocation(
+    before: Mapping[str, str], after: Mapping[str, str]
+) -> bool:
+    """Allow only a release tarball's same-package official Archive location."""
+    filename = f"{before['package']}_{before['version']}.tar.gz"
+    old_url = before["url"]
+    if not old_url.startswith(
+        ("https://bioconductor.org/", "https://cran.r-project.org/")
+    ) or not old_url.endswith(f"/src/contrib/{filename}"):
+        return False
+    return after["url"] == (
+        old_url.removesuffix(filename) + f"Archive/{before['package']}/{filename}"
+    )
+
+
 def _unchanged_source_archives(
     *,
     expanded_source_lock: Path = ENVIRONMENT_IMPLEMENTATION_PATHS["r-sources.lock"],
@@ -186,9 +201,21 @@ def _unchanged_source_archives(
     for package in packages:
         if package not in baseline or package not in current:
             raise BenchmarkError(f"Pinned source package is missing: {package}")
-        if baseline[package] != current[package]:
+        # URLs locate archives; the locked digest identifies their bytes. A
+        # reviewed release-to-Archive move must not become a package upgrade.
+        before = baseline[package]
+        after = current[package]
+        if {key: value for key, value in before.items() if key != "url"} != {
+            key: value for key, value in after.items() if key != "url"
+        }:
             raise BenchmarkError(
                 f"Pinned source archive changed across environments: {package}"
+            )
+        if before["url"] != after["url"] and not _is_official_archive_relocation(
+            before, after
+        ):
+            raise BenchmarkError(
+                f"Pinned source URL is not an official Archive relocation: {package}"
             )
         unchanged[package] = current[package]
     return unchanged

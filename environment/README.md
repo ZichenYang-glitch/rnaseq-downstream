@@ -212,6 +212,36 @@ empty R library. Run `bootstrap.R`, then `verify.R`, then every existing oracle
 and simulation gate with benchmark skipping disabled. Reusing a populated
 library is not accepted as evidence of a clean rebuild.
 
+## Locked source migration policy
+
+A source URL is a retrieval location; the locked SHA-256 digest is the content
+identity. If a pinned version leaves the release tree, audit every source URL
+with HTTP HEAD. A release URL returning 404 may move to the same package and
+version under the official Bioconductor or CRAN `Archive/` tree only after a
+fresh download matches the existing SHA-256 exactly. A transport error or 5xx
+response is not evidence of a move. A digest mismatch is a hard stop: never
+change the version or hash to make a replacement pass, or silently use a mirror.
+
+Record the old URL/status, candidate URL/status, and download digest in a
+machine-readable migration audit. Preserve the previous source lock in a new
+append-only environment snapshot before editing its URL, and keep every
+previously committed snapshot and benchmark report byte-identical. Historical
+evidence continues to resolve current file first, then snapshot by hash.
+Compatibility checks retain every source identity field and allow only an
+official same-package, same-version release-to-Archive locator change; the
+resolved source record, including its URL, remains in each compatibility report.
+The full fresh rebuild, runtime verification, live gates, and frozen numeric
+artifact checks remain mandatory after a migration.
+
+The [2026-09-13 URL audit](source-audits/2026-09-13-url-audit.json) checks all nine
+source records. Only compcodeR 1.48.0 moved to its official Archive URL; the
+download retains SHA-256
+`9890c63d8f6cb585ef9311fa888d162ebe1148809c9082d8710f39a07a013b07`.
+The other eight URLs remain unchanged. The prior D1/D2 source-lock bytes are
+preserved in the new `snapshots/p1-source-urls-0dba865/` sibling; the existing
+P0/C1/C2 snapshot is untouched. The exact-URL test is updated only for this
+verified locator migration; package versions and digest assertions do not change.
+
 ## Preserve environment evidence across lock changes
 
 An archived benchmark report is immutable: never rewrite its implementation
